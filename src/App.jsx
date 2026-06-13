@@ -1,149 +1,66 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./App.css";
+import ProtectedRoute from "./components/ProtectedRoute";
+import { AuthProvider } from "./context/AuthContext";
+import { CartProvider } from "./context/CartContext";
+import { ToastProvider } from "./context/ToastContext";
+import AdminLayout from "./layouts/AdminLayout";
+import UserLayout from "./layouts/UserLayout";
+import AdminDashboardPage from "./pages/Admin/AdminDashboardPage";
+import LoginPage from "./pages/Auth/LoginPage";
+import RegisterPage from "./pages/Auth/RegisterPage";
+import CartPage from "./pages/Cart/CartPage";
+import CheckoutPage from "./pages/Checkout/CheckoutPage";
+import HomePage from "./pages/Home/HomePage";
+import ProductDetailPage from "./pages/ProductDetail/ProductDetailPage";
+import ProductsPage from "./pages/Products/ProductsPage";
 
 function App() {
-  const [products, setProducts] = useState([]);
-
-  const categories = [
-    "Điện thoại",
-    "Laptop",
-    "Máy tính bảng",
-    "Phụ kiện",
-    "Đồng hồ thông minh",
-    "PC, màn hình",
-    "Tivi",
-    "Âm thanh",
-  ];
-
-  useEffect(() => {
-    axios
-      .get("http://127.0.0.1:8000/api/products")
-      .then((res) => setProducts(res.data.data))
-      .catch((err) => console.error("Lỗi load sản phẩm:", err));
-  }, []);
-
   return (
-    <div className="app">
-      <header className="top-header">
-        <div className="container header-inner">
-          <div className="logo">BStore</div>
-
-          <button className="category-btn">☰ Danh mục</button>
-
-          <div className="search-box">
-            <span>🔍</span>
-            <input placeholder="Bạn cần tìm gì?" />
-          </div>
-
-          <div className="header-action">
-            <span>📞</span>
-            <div>
-              <small>Gọi mua hàng</small>
-              <b>0123456789</b>
-            </div>
-          </div>
-
-          <div className="header-action">
-            <span>🛒</span>
-            <div>
-              <small>Giỏ hàng</small>
-              <b>0 sản phẩm</b>
-            </div>
-          </div>
-
-          <button className="login-btn">Đăng nhập</button>
-        </div>
-      </header>
-
-      <main className="container main-layout">
-        <aside className="side-menu">
-          {categories.map((item, index) => (
-            <div className="menu-item" key={index}>
-              <span>📱</span>
-              <p>{item}</p>
-              <b>›</b>
-            </div>
-          ))}
-        </aside>
-
-        <section className="center-content">
-          <div className="banner">
-            <div>
-              <p className="sale-label">BSTORE TECHNOLOGY</p>
-              <h1>Siêu sale thiết bị điện tử</h1>
-              <p>Điện thoại, laptop, phụ kiện chính hãng, giá tốt mỗi ngày.</p>
-              <button>Mua ngay</button>
-            </div>
-
-            <div className="banner-phone">📱</div>
-          </div>
-
-          <div className="quick-tabs">
-            <div>iPhone 15 Pro Max</div>
-            <div>Laptop văn phòng</div>
-            <div>Phụ kiện giá tốt</div>
-            <div>Thanh toán COD</div>
-          </div>
-        </section>
-
-        <aside className="right-news">
-          <div className="news-card red">
-            <b>Khuyến mãi hôm nay</b>
-            <p>Giảm đến 30% cho phụ kiện</p>
-          </div>
-
-          <div className="news-card">
-            <b>Thu cũ đổi mới</b>
-            <p>Trợ giá lên đến 2 triệu</p>
-          </div>
-
-          <div className="news-card">
-            <b>Trả góp 0%</b>
-            <p>Duyệt nhanh trong 10 phút</p>
-          </div>
-        </aside>
-      </main>
-
-      <section className="container product-section">
-        <div className="section-heading">
-          <h2>Sản phẩm nổi bật</h2>
-          <div className="filter-buttons">
-            <button>Điện thoại</button>
-            <button>Laptop</button>
-            <button>Phụ kiện</button>
-            <button>Apple</button>
-          </div>
-        </div>
-
-        <div className="product-grid">
-          {products.map((product) => (
-            <div className="product-card" key={product.id}>
-              <div className="product-image">
-                <span>📱</span>
-              </div>
-
-              <h3>{product.name}</h3>
-
-              <p className="product-desc">{product.description}</p>
-
-              <div className="price-row">
-                <span className="price">
-                  {Number(product.price).toLocaleString("vi-VN")}đ
-                </span>
-              </div>
-
-              <div className="installment">Trả góp 0%</div>
-
-              <div className="card-bottom">
-                <button>Thêm vào giỏ</button>
-                <span>♡</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
+    <BrowserRouter>
+      <ToastProvider>
+        <AuthProvider>
+          <CartProvider>
+            <Routes>
+              <Route element={<UserLayout />}>
+                <Route index element={<HomePage />} />
+                <Route path="products" element={<ProductsPage />} />
+                <Route path="products/:idOrSlug" element={<ProductDetailPage />} />
+                <Route path="login" element={<LoginPage />} />
+                <Route path="register" element={<RegisterPage />} />
+                <Route
+                  path="cart"
+                  element={
+                    <ProtectedRoute roles={["customer", "admin"]}>
+                      <CartPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="checkout"
+                  element={
+                    <ProtectedRoute roles={["customer"]}>
+                      <CheckoutPage />
+                    </ProtectedRoute>
+                  }
+                />
+              </Route>
+              <Route
+                element={
+                  <ProtectedRoute roles={["admin"]}>
+                    <AdminLayout />
+                  </ProtectedRoute>
+                }
+                path="admin"
+              >
+                <Route index element={<AdminDashboardPage />} />
+              </Route>
+              <Route path="*" element={<Navigate replace to="/" />} />
+            </Routes>
+          </CartProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </BrowserRouter>
   );
 }
 

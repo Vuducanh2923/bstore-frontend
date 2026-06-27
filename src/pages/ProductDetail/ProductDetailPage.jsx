@@ -8,8 +8,11 @@ import { getApiErrorMessage } from "../../services/api";
 import { productService } from "../../services/bstoreService";
 import {
   formatCurrency,
+  formatSalePercent,
+  getProductSaleInfo,
   getProductSpecEntries,
   normalizeProduct,
+  resolveMediaUrl,
 } from "../../utils/formatters";
 
 const PRIORITY_SPEC_KEYS = [
@@ -22,6 +25,35 @@ const PRIORITY_SPEC_KEYS = [
   "display",
   "battery",
   "camera",
+];
+
+const DETAIL_SERVICE_ITEMS = [
+  {
+    icon: "✓",
+    title: "Chính hãng 100%",
+    text: "Sản phẩm mới, đầy đủ hóa đơn và bảo hành.",
+  },
+  {
+    icon: "↺",
+    title: "Bảo hành tận nơi",
+    text: "Hỗ trợ đổi mới theo chính sách của BStore.",
+  },
+  {
+    icon: "⚡",
+    title: "Đổi trả 30 ngày",
+    text: "Lỗi từ nhà sản xuất được hỗ trợ nhanh chóng.",
+  },
+  {
+    icon: "▣",
+    title: "Giao hàng toàn quốc",
+    text: "Nhận hàng, kiểm tra rồi thanh toán an toàn.",
+  },
+];
+
+const DETAIL_PROMOTIONS = [
+  "Giảm thêm khi thanh toán bằng thẻ ngân hàng.",
+  "Trả góp 0% qua thẻ tín dụng.",
+  "Thu cũ đổi mới trợ giá lên đến 2 triệu.",
 ];
 
 function getHighlightSpecs(product) {
@@ -42,6 +74,48 @@ function getHighlightSpecs(product) {
 function getVariantName(variant = {}, index = 0) {
   const parts = [variant.color, variant.ram, variant.storage].filter(Boolean);
   return parts.length ? parts.join(" / ") : `Cấu hình ${index + 1}`;
+}
+
+function getImageValue(image = {}) {
+  if (typeof image === "string") {
+    return image;
+  }
+
+  return (
+    image.full_image_url ||
+    image.fullImageUrl ||
+    image.image_url ||
+    image.imageUrl ||
+    image.thumbnail_url ||
+    image.thumbnailUrl ||
+    image.thumbnail ||
+    image.url ||
+    image.path ||
+    ""
+  );
+}
+
+function getProductGalleryImages(product = {}) {
+  const rawImages = Array.isArray(product.raw?.images) ? product.raw.images : [];
+  const imageValues = [
+    product.imageUrl,
+    product.thumbnail,
+    ...rawImages.map(getImageValue),
+  ].filter(Boolean);
+  const uniqueImages = Array.from(new Set(imageValues.map((image) => String(image).trim())))
+    .filter(Boolean);
+
+  return uniqueImages.map(resolveMediaUrl);
+}
+
+function getVariantValues(variants = [], field) {
+  return Array.from(
+    new Set(
+      variants
+        .map((variant) => String(variant?.[field] || "").trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function getStatusText(status) {
@@ -90,7 +164,7 @@ function getWarrantyRows(policy) {
 }
 
 export default function ProductDetailPage() {
-  const { idOrSlug } = useParams();
+  const { slug } = useParams();
   const { isAuthenticated } = useAuth();
   const { addToCart } = useCart();
   const { showToast } = useToast();
@@ -98,6 +172,8 @@ export default function ProductDetailPage() {
   const location = useLocation();
   const [product, setProduct] = useState(null);
   const [selectedVariantId, setSelectedVariantId] = useState("");
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [activeDetailTab, setActiveDetailTab] = useState("description");
   const [quantity, setQuantity] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -110,31 +186,16 @@ export default function ProductDetailPage() {
       setError("");
 
       try {
-        if (/^\d+$/.test(String(idOrSlug))) {
-          const payload = await productService.getProduct(idOrSlug);
-          if (mounted) {
-            const normalizedProduct = normalizeProduct(payload);
-            setProduct(normalizedProduct);
-            setSelectedVariantId(String(normalizedProduct.variantId || ""));
-            setQuantity(1);
-          }
-          return;
-        }
-
-        const payload = await productService.getProducts();
-        const products = Array.isArray(payload) ? payload : payload?.data || [];
-        const found = products.find((item) => item.slug === idOrSlug);
-
-        if (!found) {
-          throw new Error("Không tìm thấy sản phẩm.");
-        }
-
+        const payload = await productService.getProduct(slug);
         if (mounted) {
-          const normalizedProduct = normalizeProduct(found);
+          const normalizedProduct = normalizeProduct(payload?.product || payload);
           setProduct(normalizedProduct);
           setSelectedVariantId(String(normalizedProduct.variantId || ""));
+          setSelectedImageIndex(0);
+          setActiveDetailTab("description");
           setQuantity(1);
         }
+
       } catch (err) {
         if (mounted) {
           setError(getApiErrorMessage(err, "Không tải được chi tiết sản phẩm."));
@@ -151,13 +212,13 @@ export default function ProductDetailPage() {
     return () => {
       mounted = false;
     };
-  }, [idOrSlug]);
+  }, [slug]);
 
   const handleAddToCart = async () => {
     if (!isAuthenticated) {
       showToast("Vui lòng đăng nhập để mua hàng.", "warning");
       navigate("/login", { state: { from: location } });
-      return;
+      return false;
     }
 
     const selectedVariant =
@@ -177,8 +238,18 @@ export default function ProductDetailPage() {
     try {
       await addToCart(cartProduct, quantity);
       showToast("Đã thêm sản phẩm vào giỏ hàng.", "success");
+      return true;
     } catch (err) {
       showToast(getApiErrorMessage(err, "Không thêm được vào giỏ."), "error");
+      return false;
+    }
+  };
+
+  const handleBuyNow = async () => {
+    const added = await handleAddToCart();
+
+    if (added) {
+      navigate("/cart");
     }
   };
 
@@ -211,79 +282,165 @@ export default function ProductDetailPage() {
     ) ||
     product.variants[0] ||
     {};
-  const selectedPrice = Number(selectedVariant.price ?? product.price ?? 0);
+  const selectedVariantSpecEntries = getProductSpecEntries({
+    specifications: selectedVariant.specifications,
+  });
+  const visibleSpecEntries = selectedVariantSpecEntries.length
+    ? selectedVariantSpecEntries
+    : specEntries;
+  const selectedOriginalPrice = Number(selectedVariant.price ?? product.price ?? 0);
+  const saleInfo = getProductSaleInfo({
+    ...product.raw,
+    is_sale: product.isSale,
+    price: selectedOriginalPrice,
+    sale_percent: product.salePercent,
+    sale_price: product.salePrice,
+  });
+  const selectedPrice = saleInfo.displayPrice;
   const selectedStatus = selectedVariant.status || product.status;
   const selectedSku = selectedVariant.sku || product.raw?.sku || "Đang cập nhật";
   const warrantyRows = getWarrantyRows(product.warrantyPolicy);
+  const productImages = getProductGalleryImages(product);
+  const selectedImageSrc =
+    productImages[selectedImageIndex] || productImages[0] || "";
+  const storageOptions = getVariantValues(product.variants, "storage");
+  const colorOptions = getVariantValues(product.variants, "color");
+  const selectedStock = Number(
+    selectedVariant.inventory?.quantity ??
+      selectedVariant.stock ??
+      product.stock ??
+      0,
+  );
+  const descriptionHtml = product.description || product.raw?.description || "";
+  const shortDescription =
+    product.raw?.short_description ||
+    product.raw?.shortDescription ||
+    "Sản phẩm chính hãng tại BStore, đầy đủ bảo hành và hỗ trợ kỹ thuật.";
+  const tabSpecCount = visibleSpecEntries.length || 0;
+
+  const handleVariantValueClick = (field, value) => {
+    const otherField = field === "storage" ? "color" : "storage";
+    const otherValue = selectedVariant?.[otherField];
+    const matchedVariant =
+      product.variants.find(
+        (variant) =>
+          String(variant?.[field] || "") === value &&
+          (!otherValue || String(variant?.[otherField] || "") === String(otherValue)),
+      ) ||
+      product.variants.find((variant) => String(variant?.[field] || "") === value);
+
+    if (matchedVariant?.id) {
+      setSelectedVariantId(String(matchedVariant.id));
+    }
+  };
 
   return (
     <main className="container detail-page">
       <nav className="detail-breadcrumb" aria-label="Breadcrumb">
         <Link to="/products">Sản phẩm</Link>
         <span>/</span>
-        <span>{product.category}</span>
+        <span>{product.name}</span>
       </nav>
 
-      <section className="detail-card detail-card--expanded">
-        <div className="detail-image">
-          <span className="detail-image-badge">{getStatusText(selectedStatus)}</span>
-          {product.imageUrl ? (
-            <img alt={product.name} src={product.imageUrl} />
-          ) : (
-            <div className="detail-placeholder">BStore</div>
-          )}
-        </div>
-        <div className="detail-info">
-          <div className="detail-topline">
-            <span>{product.category}</span>
-            {product.brand ? <strong>{product.brand}</strong> : null}
+      <section className="detail-showcase">
+        <aside className="detail-gallery" aria-label="Ảnh sản phẩm">
+          <div className="detail-main-image">
+            <span className="detail-image-badge">{getStatusText(selectedStatus)}</span>
+            {selectedImageSrc ? (
+              <img alt={product.name} src={selectedImageSrc} />
+            ) : (
+              <div className="detail-placeholder">BStore</div>
+            )}
           </div>
-          <h1>{product.name}</h1>
-          <p>{product.description}</p>
-
-          <dl className="detail-meta">
-            <div>
-              <dt>Thương hiệu</dt>
-              <dd>{product.brand || "Đang cập nhật"}</dd>
-            </div>
-            <div>
-              <dt>Danh mục</dt>
-              <dd>{product.category}</dd>
-            </div>
-            <div>
-              <dt>SKU</dt>
-              <dd>{selectedSku}</dd>
-            </div>
-          </dl>
-
-          {highlightSpecs.length ? (
-            <div className="spec-highlight-grid" aria-label="Thông số nổi bật">
-              {highlightSpecs.map((spec) => (
-                <div className="spec-chip" key={spec.key}>
-                  <span>{spec.label}</span>
-                  <strong>{spec.value}</strong>
-                </div>
+          {productImages.length > 1 ? (
+            <div className="detail-thumbnail-list">
+              {productImages.map((image, index) => (
+                <button
+                  className={index === selectedImageIndex ? "active" : ""}
+                  key={image}
+                  onClick={() => setSelectedImageIndex(index)}
+                  type="button"
+                >
+                  <img alt="" src={image} />
+                </button>
               ))}
             </div>
           ) : null}
+        </aside>
 
-          <div className="detail-price">
-            <strong>{formatCurrency(selectedPrice)}</strong>
-            {product.oldPrice > selectedPrice ? (
-              <span>{formatCurrency(product.oldPrice)}</span>
-            ) : null}
+        <section className="detail-buy-card">
+          <div className="detail-product-heading">
+            <span>{product.category}</span>
+            <h1>{product.name}</h1>
+            <p>
+              {product.brand ? `${product.brand} · ` : ""}
+              SKU: {selectedSku}
+            </p>
           </div>
 
+          <div className={`detail-price${saleInfo.isSale ? " detail-price--sale" : ""}`}>
+            {saleInfo.isSale ? (
+              <>
+                <strong>{formatCurrency(saleInfo.salePrice)}</strong>
+                <span>{formatCurrency(saleInfo.originalPrice)}</span>
+                <small className="detail-sale-badge">
+                  -{formatSalePercent(saleInfo.salePercent)}%
+                </small>
+              </>
+            ) : (
+              <strong>{formatCurrency(selectedPrice)}</strong>
+            )}
+          </div>
+
+          <p className="detail-tax-note">Giá đã bao gồm VAT. Hàng mới, chính hãng.</p>
+
+          {storageOptions.length ? (
+            <div className="detail-option-group">
+              <span>Dung lượng</span>
+              <div className="detail-pill-list">
+                {storageOptions.map((storage) => (
+                  <button
+                    className={String(selectedVariant.storage || "") === storage ? "active" : ""}
+                    key={storage}
+                    onClick={() => handleVariantValueClick("storage", storage)}
+                    type="button"
+                  >
+                    {storage}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {colorOptions.length ? (
+            <div className="detail-option-group">
+              <span>Màu sắc</span>
+              <div className="detail-pill-list detail-color-list">
+                {colorOptions.map((color) => (
+                  <button
+                    className={String(selectedVariant.color || "") === color ? "active" : ""}
+                    key={color}
+                    onClick={() => handleVariantValueClick("color", color)}
+                    type="button"
+                  >
+                    <i aria-hidden="true" />
+                    {color}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {product.variants.length ? (
-            <div className="variant-selector">
-              <span>Phiên bản</span>
-              <div className="variant-option-list">
+            <div className="detail-option-group">
+              <span>Cấu hình</span>
+              <div className="detail-variant-scroll">
                 {product.variants.map((variant, index) => (
                   <button
                     className={
                       String(selectedVariant.id) === String(variant.id)
-                        ? "variant-option active"
-                        : "variant-option"
+                        ? "detail-variant-tile active"
+                        : "detail-variant-tile"
                     }
                     key={variant.id || index}
                     onClick={() => setSelectedVariantId(String(variant.id))}
@@ -297,108 +454,150 @@ export default function ProductDetailPage() {
             </div>
           ) : null}
 
-          <div className="stock-line">
-            Tồn kho:{" "}
-            <strong>
-              {product.stock > 0 ? `${product.stock} sản phẩm` : "Đang cập nhật"}
-            </strong>
+          <div className="detail-stock-row">
+            <span>{selectedStock > 0 ? "Còn hàng" : "Liên hệ tồn kho"}</span>
+            <label>
+              <button
+                onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                type="button"
+              >
+                -
+              </button>
+              <input
+                aria-label="Số lượng"
+                min="1"
+                onChange={(event) =>
+                  setQuantity(Math.max(1, Number(event.target.value) || 1))
+                }
+                type="number"
+                value={quantity}
+              />
+              <button
+                onClick={() => setQuantity((current) => current + 1)}
+                type="button"
+              >
+                +
+              </button>
+            </label>
           </div>
-          <label className="quantity-control">
-            Số lượng
-            <input
-              min="1"
-              onChange={(event) =>
-                setQuantity(Math.max(1, Number(event.target.value) || 1))
-              }
-              type="number"
-              value={quantity}
-            />
-          </label>
-          <div className="detail-actions">
-            <button className="primary-button" onClick={handleAddToCart} type="button">
-              Thêm vào giỏ
+
+          <div className="detail-actions detail-actions--purchase">
+            <button className="primary-button" onClick={handleBuyNow} type="button">
+              Mua ngay
+              <small>Giao hàng hoặc nhận tại cửa hàng</small>
             </button>
-            <Link className="secondary-button" to="/products">
-              Xem thêm sản phẩm
-            </Link>
+            <button className="secondary-button" onClick={handleAddToCart} type="button">
+              Thêm giỏ hàng
+              <small>Đặt giữ sản phẩm</small>
+            </button>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="detail-section-grid">
-        <article className="detail-panel detail-panel--specs">
-          <div className="detail-panel-heading">
-            <div>
-              <span>Device specs</span>
-              <h2>Thông số kỹ thuật</h2>
-            </div>
-            <strong>{specEntries.length || 0} mục</strong>
-          </div>
-          {specEntries.length ? (
-            <div className="spec-table">
-              {specEntries.map((spec) => (
-                <div className="spec-row" key={spec.key}>
-                  <span>{spec.label}</span>
-                  <strong>{spec.value}</strong>
+        <aside className="detail-service-card">
+          <h2>Cam kết tại BStore</h2>
+          <div className="detail-service-list">
+            {DETAIL_SERVICE_ITEMS.map((item) => (
+              <div className="detail-service-item" key={item.title}>
+                <span>{item.icon}</span>
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.text}</p>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="empty-detail-note">
-              Sản phẩm này chưa có thông số từ backend.
-            </p>
-          )}
-        </article>
-
-        <article className="detail-panel">
-          <div className="detail-panel-heading">
-            <div>
-              <span>Options</span>
-              <h2>Cấu hình bán</h2>
-            </div>
+              </div>
+            ))}
           </div>
-          {product.variants.length ? (
-            <div className="variant-list">
-              {product.variants.map((variant, index) => (
-                <div className="variant-row" key={variant.id || index}>
-                  <div>
-                    <strong>{getVariantName(variant, index)}</strong>
-                    <span>SKU: {variant.sku || "Đang cập nhật"}</span>
-                  </div>
-                  <div>
-                    <strong>{formatCurrency(variant.price)}</strong>
-                    <span>{getStatusText(variant.status)}</span>
-                  </div>
-                </div>
+          <div className="detail-promo-box">
+            <h3>Ưu đãi thanh toán</h3>
+            <ul>
+              {DETAIL_PROMOTIONS.map((promotion) => (
+                <li key={promotion}>{promotion}</li>
               ))}
-            </div>
-          ) : (
-            <p className="empty-detail-note">Chưa có cấu hình bán riêng.</p>
-          )}
-        </article>
-
-        <article className="detail-panel">
-          <div className="detail-panel-heading">
-            <div>
-              <span>Service</span>
-              <h2>Bảo hành & dịch vụ</h2>
-            </div>
+            </ul>
           </div>
           {warrantyRows.length ? (
-            <div className="warranty-list">
-              {warrantyRows.map((row) => (
-                <div className="warranty-item" key={row.label}>
+            <div className="detail-warranty-mini">
+              {warrantyRows.slice(0, 3).map((row) => (
+                <div key={row.label}>
                   <span>{row.label}</span>
                   <strong>{row.value}</strong>
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="empty-detail-note">
-              Chưa có chính sách bảo hành cho sản phẩm này.
-            </p>
-          )}
-        </article>
+          ) : null}
+        </aside>
+      </section>
+
+      <section className="detail-content-card">
+        <div className="detail-tabs" role="tablist" aria-label="Thông tin sản phẩm">
+          <button
+            className={activeDetailTab === "description" ? "active" : ""}
+            onClick={() => setActiveDetailTab("description")}
+            type="button"
+          >
+            Mô tả sản phẩm
+          </button>
+          <button
+            className={activeDetailTab === "specs" ? "active" : ""}
+            onClick={() => setActiveDetailTab("specs")}
+            type="button"
+          >
+            Thông số kỹ thuật
+          </button>
+        </div>
+
+        {activeDetailTab === "description" ? (
+          <article className="detail-description-panel">
+            <h2>{product.name}</h2>
+            <p className="detail-short-description">{shortDescription}</p>
+            <div
+              className="detail-description-content"
+              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+            />
+            {highlightSpecs.length ? (
+              <div className="detail-highlight-box">
+                {highlightSpecs.map((spec) => (
+                  <div key={spec.key}>
+                    <span>✓</span>
+                    <p>
+                      <strong>{spec.label}:</strong> {spec.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {tabSpecCount ? (
+              <>
+                <h3>Thông số kỹ thuật chi tiết</h3>
+                <div className="spec-table">
+                  {visibleSpecEntries.map((spec) => (
+                    <div className="spec-row" key={`${spec.group || "spec"}-${spec.key}`}>
+                      <span>{spec.label}</span>
+                      <strong>{spec.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </article>
+        ) : (
+          <article className="detail-description-panel">
+            <h2>Thông số kỹ thuật</h2>
+            {visibleSpecEntries.length ? (
+              <div className="spec-table">
+                {visibleSpecEntries.map((spec) => (
+                  <div className="spec-row" key={`${spec.group || "spec"}-${spec.key}`}>
+                    <span>{spec.label}</span>
+                    <strong>{spec.value}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-detail-note">
+                Sản phẩm này chưa có thông số từ backend.
+              </p>
+            )}
+          </article>
+        )}
       </section>
     </main>
   );

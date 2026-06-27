@@ -1,65 +1,101 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { useCart } from "../context/CartContext";
-import { useToast } from "../context/ToastContext";
-import { getApiErrorMessage } from "../services/api";
-import { formatCurrency, getProductSpecEntries } from "../utils/formatters";
+import { memo } from "react";
+import { Link } from "react-router-dom";
+import {
+  formatCurrency,
+  formatSalePercent,
+  getProductSaleInfo,
+  resolveMediaUrl,
+} from "../utils/formatters";
 
-export default function ProductCard({ product }) {
-  const { isAuthenticated } = useAuth();
-  const { addToCart } = useCart();
-  const { showToast } = useToast();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const detailPath = `/products/${product.id}`;
-  const compactSpecs = getProductSpecEntries(product).slice(0, 3);
+const CARD_IMAGE_WIDTH = 280;
+const CARD_IMAGE_HEIGHT = 244;
 
-  const handleAddToCart = async (event) => {
-    event.preventDefault();
-
-    if (!isAuthenticated) {
-      showToast("Vui lòng đăng nhập để mua hàng.", "warning");
-      navigate("/login", { state: { from: location } });
-      return;
-    }
-
-    try {
-      await addToCart(product, 1);
-      showToast("Đã thêm sản phẩm vào giỏ hàng.", "success");
-    } catch (error) {
-      showToast(getApiErrorMessage(error, "Không thêm được vào giỏ."), "error");
-    }
-  };
+function ProductCard({ product }) {
+  const { name, rating, slug, thumbnail } = product;
+  const detailTarget = slug || name;
+  const detailPath = `/products/${encodeURIComponent(detailTarget)}`;
+  const imageSrc = thumbnail ? resolveMediaUrl(thumbnail) : "";
+  const saleInfo = getProductSaleInfo(product);
+  const ratingValue = Number(rating);
 
   return (
     <article className="product-card">
-      <Link className="product-image" to={detailPath}>
-        {product.imageUrl ? <img alt={product.name} src={product.imageUrl} /> : <span>□</span>}
-      </Link>
-      <div className="product-category">{product.category}</div>
-      <h3>
-        <Link to={detailPath}>{product.name}</Link>
-      </h3>
-      <p className="product-desc">{product.description}</p>
-      {compactSpecs.length ? (
-        <dl className="product-specs-mini">
-          {compactSpecs.map((spec) => (
-            <div key={spec.key}>
-              <dt>{spec.label}</dt>
-              <dd>{spec.value}</dd>
-            </div>
-          ))}
-        </dl>
+      {saleInfo.isSale ? (
+        <span className="product-sale-badge">
+          -{formatSalePercent(saleInfo.salePercent)}%
+        </span>
       ) : null}
-      <div className="price-row">
-        <strong>{formatCurrency(product.price)}</strong>
-        {product.oldPrice > product.price ? (
-          <span>{formatCurrency(product.oldPrice)}</span>
-        ) : null}
+      <Link className="product-image" to={detailPath}>
+        {imageSrc ? (
+          <img
+            alt={name}
+            decoding="async"
+            height={CARD_IMAGE_HEIGHT}
+            loading="lazy"
+            src={imageSrc}
+            width={CARD_IMAGE_WIDTH}
+          />
+        ) : (
+          <span>BStore</span>
+        )}
+      </Link>
+      <h3>
+        <Link to={detailPath}>{name}</Link>
+      </h3>
+      {Number.isFinite(ratingValue) ? (
+        <div className="product-rating" aria-label={`Rating ${ratingValue} of 5`}>
+          Rating {ratingValue.toFixed(1)}
+        </div>
+      ) : null}
+      <div className={`price-row${saleInfo.isSale ? " price-row--sale" : ""}`}>
+        {saleInfo.isSale ? (
+          <>
+            <span className="price-original">
+              {formatCurrency(saleInfo.originalPrice)}
+            </span>
+            <strong className="price-sale">
+              {formatCurrency(saleInfo.salePrice)}
+            </strong>
+          </>
+        ) : (
+          <strong>{formatCurrency(saleInfo.originalPrice)}</strong>
+        )}
       </div>
-      <button className="icon-cart-button" onClick={handleAddToCart} type="button">
-        🛒
-      </button>
+      <Link className="product-detail-link" to={detailPath}>
+        Xem chi tiết
+      </Link>
     </article>
   );
 }
+
+function areProductCardsEqual(previousProps, nextProps) {
+  const previous = previousProps.product;
+  const next = nextProps.product;
+
+  return (
+    previous.name === next.name &&
+    previous.slug === next.slug &&
+    previous.price === next.price &&
+    previous.sale_percent === next.sale_percent &&
+    previous.salePercent === next.salePercent &&
+    previous.sale_price === next.sale_price &&
+    previous.is_sale === next.is_sale &&
+    previous.isSale === next.isSale &&
+    previous.thumbnail === next.thumbnail &&
+    previous.rating === next.rating
+  );
+}
+
+export function ProductCardSkeleton() {
+  return (
+    <article className="product-card product-card--skeleton" aria-hidden="true">
+      <div className="product-image skeleton-block" />
+      <div className="skeleton-line skeleton-line--title" />
+      <div className="skeleton-line skeleton-line--short" />
+      <div className="skeleton-line skeleton-line--price" />
+      <div className="skeleton-button" />
+    </article>
+  );
+}
+
+export default memo(ProductCard, areProductCardsEqual);

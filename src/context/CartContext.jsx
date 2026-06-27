@@ -9,7 +9,11 @@ import {
 } from "react";
 import { getApiErrorMessage, readCollection } from "../services/api";
 import { cartService } from "../services/bstoreService";
-import { normalizeCartItem, normalizeProduct } from "../utils/formatters";
+import {
+  getProductSaleInfo,
+  normalizeCartItem,
+  normalizeProduct,
+} from "../utils/formatters";
 import { useAuth } from "./AuthContext";
 
 const CartContext = createContext(null);
@@ -54,7 +58,15 @@ function productToCartPayload(product, quantity) {
     throw new Error("Sản phẩm chưa có biến thể để thêm vào giỏ.");
   }
 
-  const price = Number(variant.price ?? normalized.price ?? 0);
+  const variantPrice = Number(variant.price ?? normalized.price ?? 0);
+  const saleInfo = getProductSaleInfo({
+    ...normalized.raw,
+    is_sale: normalized.isSale,
+    price: variantPrice,
+    sale_percent: normalized.salePercent,
+    sale_price: normalized.salePrice,
+  });
+  const price = Number(saleInfo.displayPrice ?? variantPrice);
 
   return {
     product_variant_id: variantId,

@@ -1,93 +1,43 @@
-import { useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { useCart } from "../context/CartContext";
+import { Link, Outlet } from "react-router-dom";
+import Header from "../components/Header";
 
 export default function UserLayout() {
-  const { isAuthenticated, logout, role, user } = useAuth();
-  const { totalQuantity } = useCart();
-  const [keyword, setKeyword] = useState("");
-  const navigate = useNavigate();
-
-  const handleSearch = (event) => {
-    event.preventDefault();
-    const query = keyword.trim();
-    navigate(query ? `/products?keyword=${encodeURIComponent(query)}` : "/products");
-  };
-
   return (
     <div className="site-shell">
-      <header className="store-header">
-        <div className="container header-inner">
-          <Link className="logo" to="/">
-            BStore
-          </Link>
-          <nav className="main-nav">
-            <NavLink to="/products">Categories</NavLink>
-          </nav>
-          <form className="search-box" onSubmit={handleSearch}>
-            <span>⌕</span>
-            <input
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="Search for electronics..."
-              value={keyword}
-            />
-          </form>
-          <Link aria-label="Giỏ hàng" className="header-icon" to="/cart">
-            🛒
-            {totalQuantity > 0 ? <span>{totalQuantity}</span> : null}
-          </Link>
-          {isAuthenticated ? (
-            <div className="account-menu">
-              <button aria-label="Tài khoản" type="button">
-                ☻
-              </button>
-              <div className="account-popover">
-                <strong>{user?.name || user?.fullName || user?.email || "BStore"}</strong>
-                {role === "admin" ? <Link to="/admin">Admin</Link> : null}
-                <button onClick={logout} type="button">
-                  Đăng xuất
-                </button>
-              </div>
-            </div>
-          ) : (
-            <Link aria-label="Đăng nhập" className="header-icon" to="/login">
-              ☺
-            </Link>
-          )}
-        </div>
-      </header>
+      <Header />
+
       <Outlet />
-      <footer className="store-footer">
+
+      <footer className="store-footer" id="support">
         <div className="container footer-grid">
           <div>
             <strong>BStore</strong>
             <p>
-              Your destination for premium electronics and cutting-edge
-              technology.
+              Cửa hàng thiết bị điện tử chính hãng, tập trung vào laptop, PC,
+              linh kiện và phụ kiện công nghệ.
             </p>
           </div>
           <div>
-            <strong>Shop</strong>
-            <Link to="/products">All Products</Link>
-            <Link to="/products?sort=flash">Flash Sale</Link>
-            <Link to="/products?sort=new">New Arrivals</Link>
+            <strong>Mua sắm</strong>
+            <Link to="/products">Tất cả sản phẩm</Link>
+            <Link to="/sale">Khuyến mãi</Link>
+            <Link to="/new-products">Hàng mới</Link>
           </div>
           <div>
-            <strong>Support</strong>
-            <span>Help Center</span>
-            <span>Track Order</span>
-            <span>Returns</span>
+            <strong>Hỗ trợ</strong>
+            <Link to="/warranty-policy">Bảo hành</Link>
+            <Link to="/return-policy">Đổi trả</Link>
+            <Link to="/shipping-policy">Giao hàng</Link>
           </div>
           <div>
-            <strong>Legal</strong>
-            <span>Privacy Policy</span>
-            <span>Terms of Service</span>
-            <span>Contact Us</span>
+            <strong>BStore</strong>
+            <Link to="/news">Tin công nghệ</Link>
+            <Link to="/contact">Liên hệ</Link>
+            <Link to="/terms-of-use">Điều khoản</Link>
           </div>
         </div>
         <div className="container footer-bottom">
-          © 2024 BStore E-commerce. All rights reserved.
+          Copyright 2024 BStore E-commerce. All rights reserved.
         </div>
       </footer>
     </div>

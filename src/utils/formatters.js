@@ -9,6 +9,98 @@ export function formatCurrency(value) {
   }).format(number);
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : null;
+}
+
+function truthySaleFlag(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    return normalized !== "" && !["0", "false", "no", "off"].includes(normalized);
+  }
+
+  return false;
+}
+
+export function calculateSalePrice(price, salePercent) {
+  const originalPrice = finiteNumber(price);
+  const percent = finiteNumber(salePercent);
+
+  if (originalPrice === null || percent === null || percent <= 0) {
+    return null;
+  }
+
+  return Math.round((originalPrice - originalPrice * percent / 100) * 100) / 100;
+}
+
+export function formatSalePercent(value) {
+  const number = finiteNumber(value) ?? 0;
+
+  return Number.isInteger(number)
+    ? String(number)
+    : number.toFixed(2).replace(/\.?0+$/, "");
+}
+
+export function getProductSaleInfo(product = {}) {
+  const originalPrice = finiteNumber(
+    product.price ??
+      product.originalPrice ??
+      product.original_price ??
+      product.regular_price ??
+      product.variant?.price ??
+      product.variants?.[0]?.price,
+  ) ?? 0;
+  const salePercent = finiteNumber(
+    product.sale_percent ??
+      product.salePercent ??
+      product.discount_percent ??
+      product.discountPercent,
+  );
+  const explicitSalePrice = finiteNumber(
+    product.sale_price ??
+      product.salePrice ??
+      product.discount_price ??
+      product.discountPrice,
+  );
+  const calculatedSalePrice = calculateSalePrice(originalPrice, salePercent);
+  const salePrice = explicitSalePrice ?? calculatedSalePrice;
+  const inferredPercent =
+    salePercent ??
+    (originalPrice > 0 && salePrice !== null
+      ? Math.round((100 - salePrice / originalPrice * 100) * 100) / 100
+      : null);
+  const isSale =
+    originalPrice > 0 &&
+    salePrice !== null &&
+    salePrice > 0 &&
+    salePrice < originalPrice &&
+    (truthySaleFlag(product.is_sale ?? product.isSale) ||
+      (inferredPercent !== null && inferredPercent > 0));
+
+  return {
+    displayPrice: isSale ? salePrice : originalPrice,
+    isSale,
+    originalPrice,
+    salePercent: isSale ? inferredPercent : null,
+    salePrice: isSale ? salePrice : null,
+  };
+}
+
 export function normalizeRole(role) {
   const rawRole = Array.isArray(role) ? role[0] : role;
 
@@ -42,17 +134,90 @@ export function getUserRole(user = {}) {
   );
 }
 
+function getApiOrigin() {
+  return API_BASE_URL.replace(/\/api\/?$/i, "").replace(/\/+$/, "");
+}
+
+function isAbsoluteMediaUrl(value) {
+  return /^(https?:)?\/\//i.test(value) || value.startsWith("data:") || value.startsWith("blob:");
+}
+
 export function resolveMediaUrl(value) {
   if (!value || typeof value !== "string") {
     return "";
   }
 
-  if (/^(https?:)?\/\//i.test(value) || value.startsWith("data:")) {
-    return value;
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return "";
   }
 
-  const apiOrigin = API_BASE_URL.replace(/\/api\/?$/i, "");
-  return `${apiOrigin}/${value.replace(/^\/+/, "")}`;
+  if (isAbsoluteMediaUrl(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  const apiOrigin = getApiOrigin();
+  const imagePath = trimmedValue.replace(/^\/+/, "");
+
+  if (imagePath.toLowerCase().startsWith("storage/")) {
+    return `${apiOrigin}/${imagePath}`;
+  }
+
+  return `${apiOrigin}/storage/${imagePath}`;
+}
+
+function directMediaUrl(value) {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim();
+}
+
+export function toStorageRelativePath(value) {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue || trimmedValue.startsWith("data:") || trimmedValue.startsWith("blob:")) {
+    return "";
+  }
+
+  const apiOrigin = getApiOrigin();
+  const storagePrefix = `${apiOrigin}/storage/`;
+
+  if (trimmedValue.startsWith(storagePrefix)) {
+    return trimmedValue.slice(storagePrefix.length);
+  }
+
+  if (trimmedValue.startsWith(`${apiOrigin}/`)) {
+    return trimmedValue
+      .slice(apiOrigin.length + 1)
+      .replace(/^storage\/+/i, "");
+  }
+
+  try {
+    const parsedUrl = new URL(trimmedValue);
+    const storageMarker = "/storage/";
+    const storageIndex = parsedUrl.pathname.indexOf(storageMarker);
+
+    if (storageIndex >= 0) {
+      return decodeURIComponent(
+        parsedUrl.pathname.slice(storageIndex + storageMarker.length),
+      );
+    }
+  } catch {
+    // Relative storage paths are handled below.
+  }
+
+  if (/^(https?:)?\/\//i.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return trimmedValue.replace(/^\/+/, "").replace(/^storage\/+/i, "");
 }
 
 export function slugify(value) {
@@ -192,11 +357,26 @@ export function getProductSpecEntries(product = {}) {
     product.specifications || product.raw?.specifications,
   );
 
-  return Object.entries(specifications).map(([key, value]) => ({
-    key,
-    label: formatSpecLabel(key),
-    value: formatSpecValue(value),
-  }));
+  return Object.entries(specifications)
+    .filter(([key]) => !String(key).startsWith("_"))
+    .flatMap(([key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return Object.entries(value)
+          .filter(([childKey]) => !String(childKey).startsWith("_"))
+          .map(([childKey, childValue]) => ({
+            group: formatSpecLabel(key),
+            key: childKey,
+            label: formatSpecLabel(childKey),
+            value: formatSpecValue(childValue),
+          }));
+      }
+
+      return [{
+        key,
+        label: formatSpecLabel(key),
+        value: formatSpecValue(value),
+      }];
+    });
 }
 
 export function normalizeProduct(product = {}) {
@@ -215,20 +395,39 @@ export function normalizeProduct(product = {}) {
     {};
   const inventory = variant.inventory || product.inventory || {};
   const imageValue =
+    product.full_image_url ||
+    product.fullImageUrl ||
     product.imageUrl ||
     product.image_url ||
     product.thumbnail ||
     product.image ||
     product.cover ||
+    thumbnail?.full_image_url ||
+    thumbnail?.fullImageUrl ||
     thumbnail?.image_url ||
     thumbnail?.url ||
     thumbnail;
+  const basePrice = Number(variant.price ?? product.price ?? product.salePrice ?? 0);
+  const saleInfo = getProductSaleInfo({
+    ...product,
+    price: basePrice,
+  });
 
   return {
     id: product.id ?? product.productId ?? product.product_id ?? product._id,
     slug: product.slug,
-    categoryId: product.category_id ?? product.categoryId,
-    brandId: product.brand_id ?? product.brandId,
+    categoryId:
+      product.category_id ??
+      product.categoryId ??
+      product.category?.id ??
+      product.category?.category_id ??
+      product.category?.categoryId,
+    brandId:
+      product.brand_id ??
+      product.brandId ??
+      product.brand?.id ??
+      product.brand?.brand_id ??
+      product.brand?.brandId,
     warrantyPolicyId: product.warranty_policy_id ?? product.warrantyPolicyId,
     variantId:
       product.product_variant_id ??
@@ -254,12 +453,16 @@ export function normalizeProduct(product = {}) {
       product.brand_name ||
       product.brand ||
       "",
-    price: Number(variant.price ?? product.price ?? product.salePrice ?? 0),
+    price: saleInfo.originalPrice,
+    salePercent: saleInfo.salePercent,
+    salePrice: saleInfo.salePrice,
+    isSale: saleInfo.isSale,
     oldPrice: Number(
       product.oldPrice ||
         product.old_price ||
         product.originalPrice ||
         product.original_price ||
+        (saleInfo.isSale ? saleInfo.originalPrice : 0) ||
         0,
     ),
     stock: Number(
@@ -269,12 +472,87 @@ export function normalizeProduct(product = {}) {
         product.inventory?.quantity ??
         0,
     ),
-    imageUrl: resolveMediaUrl(typeof imageValue === "string" ? imageValue : ""),
+    imageUrl: directMediaUrl(typeof imageValue === "string" ? imageValue : ""),
+    thumbnail: directMediaUrl(typeof imageValue === "string" ? imageValue : ""),
     specifications: normalizeSpecifications(product.specifications),
     variants,
     warrantyPolicy: product.warranty_policy || product.warrantyPolicy || null,
     status: product.status || variant.status || "",
     raw: product,
+  };
+}
+
+export function normalizeProductSummary(product = {}) {
+  const thumbnail =
+    product.thumbnail ||
+    product.thumbnail_url ||
+    product.thumbnailUrl ||
+    product.images?.find?.((image) => image.is_thumbnail)?.thumbnail ||
+    product.images?.find?.((image) => image.is_thumbnail)?.thumbnail_url ||
+    product.images?.find?.((image) => image.is_thumbnail)?.thumbnailUrl ||
+    product.images?.find?.((image) => image.is_thumbnail)?.full_image_url ||
+    product.images?.find?.((image) => image.is_thumbnail)?.fullImageUrl ||
+    product.images?.find?.((image) => image.is_thumbnail)?.image_url ||
+    product.images?.find?.((image) => image.is_thumbnail)?.url ||
+    product.images?.[0]?.thumbnail ||
+    product.images?.[0]?.thumbnail_url ||
+    product.images?.[0]?.thumbnailUrl ||
+    product.images?.[0]?.full_image_url ||
+    product.images?.[0]?.fullImageUrl ||
+    product.images?.[0]?.image_url ||
+    product.images?.[0]?.url ||
+    product.images?.[0] ||
+    product.full_image_url ||
+    product.fullImageUrl ||
+    product.imageUrl ||
+    product.image_url ||
+    product.image ||
+    product.cover;
+  const price =
+    product.price ??
+    product.originalPrice ??
+    product.original_price ??
+    product.regular_price ??
+    product.min_price ??
+    product.variant?.price ??
+    product.variants?.[0]?.price ??
+    0;
+  const salePrice =
+    product.sale_price ??
+    product.salePrice ??
+    product.discount_price ??
+    product.discountPrice ??
+    null;
+  const rating =
+    product.rating ??
+    product.average_rating ??
+    product.averageRating ??
+    product.avg_rating ??
+    product.avgRating ??
+    null;
+  const saleInfo = getProductSaleInfo({
+    ...product,
+    price,
+    sale_price: salePrice,
+  });
+
+  return {
+    id: product.id ?? product.productId ?? product.product_id ?? product._id,
+    slug: product.slug,
+    name: product.name || product.productName || product.title || "Sản phẩm",
+    price: saleInfo.originalPrice,
+    sale_percent: saleInfo.salePercent,
+    sale_price: saleInfo.salePrice,
+    is_sale: saleInfo.isSale,
+    thumbnail: directMediaUrl(typeof thumbnail === "string" ? thumbnail : ""),
+    category: product.category,
+    category_id:
+      product.category_id ?? product.categoryId ?? product.category?.id ?? null,
+    category_name:
+      product.category_name ?? product.categoryName ?? product.category?.name ?? "",
+    category_slug:
+      product.category_slug ?? product.categorySlug ?? product.category?.slug ?? "",
+    rating: rating === null || rating === "" ? null : Number(rating),
   };
 }
 

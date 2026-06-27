@@ -1,0 +1,17 @@
+<svg width="640" height="420" viewBox="0 0 640 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="174" y="34" width="292" height="352" rx="34" fill="#172033"/>
+  <rect x="198" y="64" width="244" height="292" rx="20" fill="url(#tabletScreen)"/>
+  <circle cx="320" cy="370" r="7" fill="#CBD5E1"/>
+  <rect x="108" y="270" width="166" height="70" rx="16" fill="#E9F3FF"/>
+  <rect x="128" y="292" width="100" height="10" rx="5" fill="#0D62A7"/>
+  <rect x="128" y="312" width="72" height="8" rx="4" fill="#8CBCE8"/>
+  <path d="M386 116C416 150 416 210 386 244C356 278 304 278 274 244C244 210 244 150 274 116C304 82 356 82 386 116Z" fill="#FFFFFF" opacity="0.18"/>
+  <path d="M264 262H374L332 304H222L264 262Z" fill="#61DAFB" opacity="0.8"/>
+  <defs>
+    <linearGradient id="tabletScreen" x1="198" y1="64" x2="442" y2="356" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42A5FF"/>
+      <stop offset="0.55" stop-color="#0F62A8"/>
+      <stop offset="1" stop-color="#0B1E3B"/>
+    </linearGradient>
+  </defs>
+</svg>

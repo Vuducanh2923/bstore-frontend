@@ -6,10 +6,21 @@ export const API_ENDPOINTS = {
   },
   products: {
     list: "/products",
-    detail: (id) => `/products/${encodeURIComponent(id)}`,
+    sale: "/products/sale",
+    detail: (slug) => `/products/${encodeURIComponent(slug)}`,
   },
   categories: {
     list: "/categories",
+  },
+  brands: {
+    list: "/brands",
+  },
+  banners: {
+    list: "/banners",
+    detail: (bannerId) => `/banners/${encodeURIComponent(bannerId)}`,
+  },
+  home: {
+    banners: "/banners/home",
   },
   uploads: {
     image: "/uploads/images",
@@ -33,8 +44,14 @@ export const API_ENDPOINTS = {
   admin: {
     products: "/products",
     product: (productId) => `/products/${encodeURIComponent(productId)}`,
+    banners: "/banners",
+    banner: (bannerId) => `/banners/${encodeURIComponent(bannerId)}`,
     categories: "/categories",
-    brands: "/brands",
+    category: (categoryId) => `/categories/${encodeURIComponent(categoryId)}`,
+    brands: "/admin/brands",
+    brand: (brandId) => `/admin/brands/${encodeURIComponent(brandId)}`,
+    brandToggleStatus: (brandId) =>
+      `/admin/brands/${encodeURIComponent(brandId)}/toggle-status`,
     roles: "/roles",
     users: "/users",
     user: (userId) => `/users/${encodeURIComponent(userId)}`,

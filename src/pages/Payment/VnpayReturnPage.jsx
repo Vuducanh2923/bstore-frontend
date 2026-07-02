@@ -277,12 +277,15 @@ export default function VnpayReturnPage() {
     }
 
     let ignored = false;
+    const controller = new AbortController();
     let navigateTimerId;
 
     async function verifyPayment() {
       setLoading(true);
       setError("");
-      console.log("VNPAY query:", queryString);
+      if (import.meta.env.DEV) {
+        console.debug("VNPAY query:", queryString);
+      }
 
       if (!queryString) {
         const message = "Không tìm thấy dữ liệu phản hồi từ VNPAY.";
@@ -302,7 +305,9 @@ export default function VnpayReturnPage() {
       }
 
       try {
-        const response = await paymentService.verifyVnpayReturn(queryString);
+        const response = await paymentService.verifyVnpayReturn(queryString, {
+          signal: controller.signal,
+        });
         const payload = response?.data || {};
         const data = payload?.data || {};
         const isVnpaySuccess =
@@ -389,6 +394,10 @@ export default function VnpayReturnPage() {
           showToast(message, "error");
         }
       } catch (error) {
+        if (error?.code === "ERR_CANCELED" || controller.signal.aborted) {
+          return;
+        }
+
         console.error("VNPAY verify error:", error);
 
         const status = Number(error?.response?.status || 0);
@@ -423,6 +432,7 @@ export default function VnpayReturnPage() {
 
     return () => {
       ignored = true;
+      controller.abort();
       if (navigateTimerId) {
         window.clearTimeout(navigateTimerId);
       }

@@ -233,17 +233,21 @@ export const paymentService = {
 
     const vnpayPayload = normalizeVnpayPaymentPayload(payload);
 
-    console.log("VNPAY payload:", vnpayPayload);
+    if (import.meta.env.DEV) {
+      console.debug("VNPAY payload:", vnpayPayload);
+    }
 
     const response = await api.post(API_ENDPOINTS.payments.vnpayCreate, vnpayPayload);
     const responsePayload = unwrapResponse(response);
 
-    console.log("VNPAY response:", responsePayload);
+    if (import.meta.env.DEV) {
+      console.debug("VNPAY response:", responsePayload);
+    }
 
     return responsePayload;
   },
-  verifyVnpayReturn: (queryString = "") =>
-    api.get(`${API_ENDPOINTS.payments.vnpayReturn}${String(queryString || "")}`),
+  verifyVnpayReturn: (queryString = "", config = {}) =>
+    api.get(`${API_ENDPOINTS.payments.vnpayReturn}${String(queryString || "")}`, config),
   getPayments: () => toPayload(api.get(API_ENDPOINTS.payments.list)),
 };
 

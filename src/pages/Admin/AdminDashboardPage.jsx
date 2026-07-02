@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import StatusMessage from "../../components/StatusMessage";
+import { useAuth } from "../../context/AuthContext";
 import { getApiErrorMessage, readCollection } from "../../services/api";
 import { adminService, uploadService } from "../../services/bstoreService";
 import { normalizeBrand } from "./Brands/BrandService";
 import ProductFormModal from "./ProductFormModal";
 import {
+  calculateSalePrice,
   formatCurrency,
   formatSalePercent,
+  getRole,
   normalizeProduct,
   normalizeSpecifications,
   resolveMediaUrl,
   slugify,
+  USER_ROLES,
 } from "../../utils/formatters";
 
 function createLocalId(prefix = "item") {
@@ -74,11 +78,6 @@ function createEmptyProductForm() {
     imageUrl: "",
     price: "",
     salePercent: "",
-    seo: {
-      metaDescription: "",
-      metaKeywords: "",
-      metaTitle: "",
-    },
     shortDescription: "",
     specifications: createDefaultSpecGroups(),
     status: "active",
@@ -105,12 +104,44 @@ const MAX_BANNER_IMAGE_SIZE = 5 * 1024 * 1024;
 const PRODUCT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_PRODUCT_IMAGE_SIZE = 5 * 1024 * 1024;
 const ADMIN_PRODUCT_PAGE_SIZE = 12;
+const ADMIN_USER_PAGE_SIZE = 10;
+const CUSTOMER_STATUS_FILTERS = ["all", "active", "locked", "suspended"];
+const ADMIN_TABS = new Set([
+  "dashboard",
+  "products",
+  "banners",
+  "categories",
+  "orders",
+  "inventory",
+  "staff",
+  "customers",
+  "settings",
+]);
+const STAFF_TABS = new Set([
+  "dashboard",
+  "products",
+  "banners",
+  "categories",
+  "orders",
+  "inventory",
+  "customers",
+  "settings",
+]);
 
 const emptyCategoryForm = {
   name: "",
   slug: "",
   icon: "",
   description: "",
+  status: "active",
+};
+
+const emptyStaffForm = {
+  avatar: "",
+  email: "",
+  fullName: "",
+  password: "",
+  phone: "",
   status: "active",
 };
 
@@ -121,6 +152,8 @@ const emptyTabSearch = {
   orders: "",
   inventory: "",
   users: "",
+  staff: "",
+  customers: "",
 };
 
 const chartBars = [
@@ -148,17 +181,102 @@ function normalizeOrder(order = {}) {
   };
 }
 
-function normalizeUser(user = {}) {
+function normalizeUser(account = {}) {
+  const roleName = getRole(account);
+  const roleKey = roleName ? roleName.toLowerCase() : "";
+
   return {
-    id: user.id,
-    name: user.full_name || user.name || "User",
+    id: account.id,
+    name: account.full_name || account.name || "User",
+    email: account.email || "",
+    phone: account.phone || "Chưa cập nhật",
+    roleId: String(account.role_id || ""),
+    role: getRoleLabel(roleName),
+    roleKey,
+    status: account.status || "active",
+    raw: account,
+  };
+}
+
+function getRoleLabel(roleName) {
+  if (roleName === USER_ROLES.ADMIN) {
+    return "Admin";
+  }
+
+  if (roleName === USER_ROLES.STAFF) {
+    return "Staff";
+  }
+
+  if (roleName === USER_ROLES.CUSTOMER) {
+    return "Customer";
+  }
+
+  return "Unknown";
+}
+
+function getUserAvatarValue(user = {}) {
+  return String(
+    user.avatar_url ||
+      user.avatarUrl ||
+      user.avatar ||
+      user.image_url ||
+      user.imageUrl ||
+      user.image ||
+      "",
+  ).trim();
+}
+
+function getUserCreatedAt(user = {}) {
+  return (
+    user.created_at ||
+    user.createdAt ||
+    user.created_date ||
+    user.createdDate ||
+    user.inserted_at ||
+    ""
+  );
+}
+
+function formatAdminDate(value) {
+  if (!value) {
+    return "Chua cap nhat";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function normalizeManagedUser(user = {}) {
+  const roleName = getRole(user);
+  const roleKey = roleName ? roleName.toLowerCase() : "";
+
+  return {
+    id: user.id ?? user.user_id ?? user.userId ?? user._id,
+    avatar: getUserAvatarValue(user),
+    name: user.full_name || user.fullName || user.name || "User",
     email: user.email || "",
-    phone: user.phone || "Chưa cập nhật",
-    roleId: String(user.role_id || user.role?.id || ""),
-    role: user.role?.name || (Number(user.role_id) === 1 ? "Admin" : "Customer"),
-    status: user.status || "active",
+    phone: user.phone || "",
+    role: getRoleLabel(roleName),
+    roleKey,
+    status: String(user.status || "active").toLowerCase(),
+    createdAt: getUserCreatedAt(user),
     raw: user,
   };
+}
+
+function isUserLocked(user = {}) {
+  return ["locked", "suspended", "disabled", "inactive", "blocked"].includes(
+    String(user.status || "").toLowerCase(),
+  );
 }
 
 function initials(value) {
@@ -408,20 +526,10 @@ function readSpecificationObject(specifications) {
 function getInternalProductMeta(specifications) {
   const specObject = readSpecificationObject(specifications);
   const summary = specObject._summary || {};
-  const seo = specObject._seo || {};
   const flags = specObject._flags || {};
 
   return {
     featured: Boolean(flags.featured ?? flags.is_featured ?? false),
-    seo: {
-      metaDescription:
-        seo.meta_description || seo.metaDescription || seo.description || "",
-      metaKeywords:
-        Array.isArray(seo.meta_keywords)
-          ? seo.meta_keywords.join(", ")
-          : seo.meta_keywords || seo.metaKeywords || seo.keywords || "",
-      metaTitle: seo.meta_title || seo.metaTitle || seo.title || "",
-    },
     shortDescription:
       summary.short_description ||
       summary.shortDescription ||
@@ -507,22 +615,10 @@ function productSpecGroupsToObject(groups = [], meta = {}) {
   }, {});
 
   const shortDescription = String(meta.shortDescription || "").trim();
-  const seo = meta.seo || {};
-  const metaTitle = String(seo.metaTitle || "").trim();
-  const metaDescription = String(seo.metaDescription || "").trim();
-  const metaKeywords = String(seo.metaKeywords || "").trim();
 
   if (shortDescription) {
     specs._summary = {
       short_description: shortDescription,
-    };
-  }
-
-  if (metaTitle || metaDescription || metaKeywords) {
-    specs._seo = {
-      meta_description: metaDescription,
-      meta_keywords: metaKeywords,
-      meta_title: metaTitle,
     };
   }
 
@@ -597,10 +693,18 @@ function productVariantsToRows(product = {}) {
   );
 }
 
-function productVariantsToPayload(rows = [], slug = "", fallbackPrice = 0) {
+function productVariantsToPayload(
+  rows = [],
+  slug = "",
+  fallbackPrice = 0,
+  salePercent = null,
+) {
   return ensureVariantRows(rows, slug).map((variant, index) => {
     const variantPrice = Number(variant.price || fallbackPrice || 0);
-    const salePrice = Number(variant.salePrice || 0);
+    const hasSalePercent = salePercent !== null && salePercent !== undefined;
+    const salePrice = hasSalePercent
+      ? Number(calculateSalePrice(variantPrice, salePercent) || 0)
+      : Number(variant.salePrice || 0);
     const generatedSku = `${slug.toUpperCase()}-${index + 1}`;
     const specifications = specRowsToObject(variant.specifications);
 
@@ -636,6 +740,25 @@ function calculateSalePercentFromPrice(price, salePrice) {
   }
 
   return Math.round((100 - discountedPrice / originalPrice * 100) * 100) / 100;
+}
+
+function readSalePercent(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const salePercent = Number(value);
+
+  return Number.isFinite(salePercent) ? salePercent : null;
+}
+
+function resolveFormSalePercent(form, firstVariant = {}) {
+  const enteredSalePercent = readSalePercent(form.salePercent);
+
+  return enteredSalePercent ?? calculateSalePercentFromPrice(
+    firstVariant.price,
+    firstVariant.salePrice,
+  );
 }
 
 function normalizeProductImageRow(image = {}, index = 0) {
@@ -759,6 +882,108 @@ function normalizeAdminProducts(payload = {}, fallbackPage = 1) {
   return {
     list: readCollection(payload, ["products"]).map(normalizeProduct),
     pagination: normalizeProductPagination(payload, fallbackPage),
+  };
+}
+
+function createAdminUserPagination(page = 1) {
+  return {
+    currentPage: page,
+    lastPage: 1,
+    perPage: ADMIN_USER_PAGE_SIZE,
+    total: 0,
+  };
+}
+
+function readAdminUserCollection(payload = {}, keys = []) {
+  const directItems = readCollection(payload, keys);
+
+  if (directItems.length > 0) {
+    return directItems;
+  }
+
+  return readCollection(payload?.data, keys);
+}
+
+function normalizeAdminUserPagination(payload = {}, fallbackPage = 1) {
+  const data = payload?.data && !Array.isArray(payload.data) ? payload.data : {};
+  const meta =
+    payload?.meta ||
+    payload?.pagination ||
+    payload?.page ||
+    data.meta ||
+    data.pagination ||
+    data.page ||
+    {};
+  const total = Number(
+    payload?.total ??
+      payload?.total_items ??
+      payload?.totalItems ??
+      data.total ??
+      data.total_items ??
+      data.totalItems ??
+      meta.total ??
+      meta.total_items ??
+      meta.totalItems ??
+      0,
+  );
+  const perPage = Number(
+    payload?.per_page ??
+      payload?.perPage ??
+      payload?.limit ??
+      data.per_page ??
+      data.perPage ??
+      data.limit ??
+      meta.per_page ??
+      meta.perPage ??
+      meta.limit ??
+      ADMIN_USER_PAGE_SIZE,
+  );
+  const currentPage = Number(
+    payload?.current_page ??
+      payload?.currentPage ??
+      payload?.page ??
+      data.current_page ??
+      data.currentPage ??
+      data.page ??
+      meta.current_page ??
+      meta.currentPage ??
+      meta.page ??
+      fallbackPage,
+  );
+  const lastPage = Number(
+    payload?.last_page ??
+      payload?.lastPage ??
+      payload?.total_pages ??
+      payload?.totalPages ??
+      data.last_page ??
+      data.lastPage ??
+      data.total_pages ??
+      data.totalPages ??
+      meta.last_page ??
+      meta.lastPage ??
+      meta.total_pages ??
+      meta.totalPages ??
+      (total > 0 ? Math.ceil(total / Math.max(perPage, 1)) : 1),
+  );
+
+  return {
+    currentPage: Math.max(1, currentPage || fallbackPage),
+    lastPage: Math.max(1, lastPage || 1),
+    perPage: Math.max(1, perPage || ADMIN_USER_PAGE_SIZE),
+    total: Math.max(0, total || 0),
+  };
+}
+
+function normalizeManagedUserPage(payload = {}, keys = [], fallbackPage = 1) {
+  const list = readAdminUserCollection(payload, keys).map(normalizeManagedUser);
+  const pagination = normalizeAdminUserPagination(payload, fallbackPage);
+
+  return {
+    list,
+    pagination: {
+      ...pagination,
+      total: pagination.total || list.length,
+    },
   };
 }
 
@@ -937,9 +1162,164 @@ function StatusPill({ children }) {
   );
 }
 
+function AdminUserAvatar({ user }) {
+  return (
+    <span className="admin-user-avatar">
+      {user.avatar ? (
+        <img alt="" src={resolveMediaUrl(user.avatar)} />
+      ) : (
+        initials(user.name)
+      )}
+    </span>
+  );
+}
+
+function AdminPagination({ disabled, label, onPageChange, pagination }) {
+  const hasRows = pagination.total > 0;
+  const start = hasRows
+    ? (pagination.currentPage - 1) * pagination.perPage + 1
+    : 0;
+  const end = hasRows
+    ? Math.min(pagination.total, start + pagination.perPage - 1)
+    : 0;
+
+  return (
+    <div className="admin-pagination">
+      <span>
+        {label} {start}-{end} / {pagination.total}
+      </span>
+      <div>
+        <button
+          disabled={disabled || pagination.currentPage <= 1}
+          onClick={() => onPageChange(pagination.currentPage - 1)}
+          type="button"
+        >
+          Truoc
+        </button>
+        <strong>
+          Trang {pagination.currentPage} / {pagination.lastPage}
+        </strong>
+        <button
+          disabled={disabled || pagination.currentPage >= pagination.lastPage}
+          onClick={() => onPageChange(pagination.currentPage + 1)}
+          type="button"
+        >
+          Sau
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StaffFormModal({
+  editingStaffId,
+  form,
+  onChange,
+  onClose,
+  onSubmit,
+  saving,
+}) {
+  return (
+    <div className="product-form-backdrop" role="presentation">
+      <form
+        aria-labelledby="staff-form-title"
+        aria-modal="true"
+        className="admin-form product-form-modal admin-user-modal"
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <header className="product-form-modal-heading">
+          <div>
+            <span>Staff</span>
+            <h2 id="staff-form-title">
+              {editingStaffId ? "Edit Staff" : "Add Staff"}
+            </h2>
+          </div>
+          <button aria-label="Close" onClick={onClose} type="button">
+            x
+          </button>
+        </header>
+        <label>
+          Ho ten
+          <input
+            autoComplete="name"
+            name="fullName"
+            onChange={onChange}
+            required
+            value={form.fullName}
+          />
+        </label>
+        <label>
+          Email
+          <input
+            autoComplete="email"
+            name="email"
+            onChange={onChange}
+            required
+            type="email"
+            value={form.email}
+          />
+        </label>
+        <label>
+          Mat khau
+          <input
+            autoComplete="new-password"
+            name="password"
+            onChange={onChange}
+            required={!editingStaffId}
+            type="password"
+            value={form.password}
+          />
+        </label>
+        <label>
+          So dien thoai
+          <input
+            autoComplete="tel"
+            name="phone"
+            onChange={onChange}
+            value={form.phone}
+          />
+        </label>
+        <label>
+          Avatar URL
+          <input
+            name="avatar"
+            onChange={onChange}
+            placeholder="https://..."
+            value={form.avatar}
+          />
+        </label>
+        <label>
+          Status
+          <select name="status" onChange={onChange} value={form.status}>
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="locked">locked</option>
+            <option value="suspended">suspended</option>
+          </select>
+        </label>
+        <div className="admin-user-modal-actions">
+          <button disabled={saving} onClick={onClose} type="button">
+            Huy
+          </button>
+          <button className="admin-primary-action" disabled={saving} type="submit">
+            {saving ? "Dang luu..." : "Luu"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function AdminDashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const tab = searchParams.get("tab") || "dashboard";
+  const currentRole = getRole(user);
+  const allowedTabs = currentRole === USER_ROLES.STAFF ? STAFF_TABS : ADMIN_TABS;
+  const canManageStaff = currentRole === USER_ROLES.ADMIN;
+  const canManageCustomers = [USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole);
   const [products, setProducts] = useState([]);
   const [productPage, setProductPage] = useState(1);
   const [productPagination, setProductPagination] = useState(() =>
@@ -951,13 +1331,27 @@ export default function AdminDashboardPage() {
   const [inventory, setInventory] = useState([]);
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [staffPage, setStaffPage] = useState(1);
+  const [staffPagination, setStaffPagination] = useState(() =>
+    createAdminUserPagination(),
+  );
+  const [customers, setCustomers] = useState([]);
+  const [customerPage, setCustomerPage] = useState(1);
+  const [customerPagination, setCustomerPagination] = useState(() =>
+    createAdminUserPagination(),
+  );
+  const [customerStatusFilter, setCustomerStatusFilter] = useState("all");
   const [roles, setRoles] = useState([]);
   const [tabSearch, setTabSearch] = useState(emptyTabSearch);
   const [productForm, setProductForm] = useState(() => createEmptyProductForm());
+  const [staffForm, setStaffForm] = useState(emptyStaffForm);
   const [bannerForm, setBannerForm] = useState(() => createEmptyBannerForm());
   const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
   const [editingProductId, setEditingProductId] = useState(null);
   const [productFormOpen, setProductFormOpen] = useState(false);
+  const [staffFormOpen, setStaffFormOpen] = useState(false);
+  const [editingStaffId, setEditingStaffId] = useState(null);
   const [editingBannerId, setEditingBannerId] = useState(null);
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -970,12 +1364,21 @@ export default function AdminDashboardPage() {
   const [message, setMessage] = useState("");
 
   const loadAdminData = useCallback(async () => {
+    if (![USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) || !allowedTabs.has(tab)) {
+      return;
+    }
+
     setLoading(true);
     setMessage("");
 
     const productRequestPage = tab === "products" ? productPage : 1;
     const productSearch =
       tab === "products" ? tabSearch.products.trim() || undefined : undefined;
+    const staffSearch =
+      tab === "staff" ? tabSearch.staff.trim() || undefined : undefined;
+    const customerSearch =
+      tab === "customers" ? tabSearch.customers.trim() || undefined : undefined;
+    const customerRequestPage = tab === "customers" ? customerPage : 1;
     const requests = [];
     const addRequest = (key, request) => {
       requests.push([key, request]);
@@ -1012,12 +1415,32 @@ export default function AdminDashboardPage() {
       addRequest("orders", adminService.getOrders());
     }
 
-    if (["dashboard", "users"].includes(tab)) {
-      addRequest("users", adminService.getUsers());
-    }
-
     if (tab === "users") {
       addRequest("roles", adminService.getRoles());
+    }
+
+    if (tab === "staff" && canManageStaff) {
+      addRequest(
+        "staff",
+        adminService.getStaff({
+          page: staffPage,
+          per_page: ADMIN_USER_PAGE_SIZE,
+          search: staffSearch,
+        }),
+      );
+    }
+
+    if (["dashboard", "customers"].includes(tab) && canManageCustomers) {
+      addRequest(
+        "customers",
+        adminService.getCustomers({
+          page: customerRequestPage,
+          per_page: ADMIN_USER_PAGE_SIZE,
+          search: customerSearch,
+          status:
+            customerStatusFilter === "all" ? undefined : customerStatusFilter,
+        }),
+      );
     }
 
     const settledResults = await Promise.allSettled(
@@ -1072,6 +1495,28 @@ export default function AdminDashboardPage() {
       setRoles(readCollection(results.roles.value, ["roles"]));
     }
 
+    if (results.staff?.status === "fulfilled") {
+      const normalizedStaff = normalizeManagedUserPage(
+        results.staff.value,
+        ["staff", "users"],
+        staffPage,
+      );
+
+      setStaff(normalizedStaff.list);
+      setStaffPagination(normalizedStaff.pagination);
+    }
+
+    if (results.customers?.status === "fulfilled") {
+      const normalizedCustomers = normalizeManagedUserPage(
+        results.customers.value,
+        ["customers", "users"],
+        customerRequestPage,
+      );
+
+      setCustomers(normalizedCustomers.list);
+      setCustomerPagination(normalizedCustomers.pagination);
+    }
+
     const rejected = getFirstRejectedResult(settledResults);
 
     if (rejected) {
@@ -1084,7 +1529,20 @@ export default function AdminDashboardPage() {
     }
 
     setLoading(false);
-  }, [productPage, tab, tabSearch.products]);
+  }, [
+    allowedTabs,
+    canManageCustomers,
+    canManageStaff,
+    customerPage,
+    customerStatusFilter,
+    currentRole,
+    productPage,
+    staffPage,
+    tab,
+    tabSearch.customers,
+    tabSearch.products,
+    tabSearch.staff,
+  ]);
 
   useEffect(() => {
     const timerId = window.setTimeout(loadAdminData, 0);
@@ -1126,9 +1584,9 @@ export default function AdminDashboardPage() {
       shippedOrders,
       activeInventory,
       activeBanners: banners.filter((banner) => banner.status).length,
-      activeUsers: users.filter((user) => user.status !== "suspended").length,
+      activeUsers: customers.filter((user) => !isUserLocked(user)).length,
     };
-  }, [banners, inventory, orders, users]);
+  }, [banners, customers, inventory, orders]);
 
   const productPageStart =
     productPagination.total > 0 && products.length > 0
@@ -1204,14 +1662,14 @@ export default function AdminDashboardPage() {
   );
   const filteredUsers = useMemo(
     () =>
-      users.filter((user) =>
+      users.filter((managedUser) =>
         matchesSearch(
           tabSearch.users,
-          user.name,
-          user.email,
-          user.phone,
-          user.role,
-          user.status,
+          managedUser.name,
+          managedUser.email,
+          managedUser.phone,
+          managedUser.role,
+          managedUser.status,
         ),
       ),
     [users, tabSearch.users],
@@ -1224,23 +1682,36 @@ export default function AdminDashboardPage() {
   const bannerPreviewUrl = bannerLocalPreviewUrl || bannerForm.imageUrl.trim();
   const salePreview = useMemo(() => {
     const firstVariant = productVariantRows[0] || {};
-    const salePercent = calculateSalePercentFromPrice(
-      firstVariant.price,
-      firstVariant.salePrice,
-    );
-    const salePrice = Number(firstVariant.salePrice || 0);
+    const originalPrice = Number(firstVariant.price || productForm.price || 0);
+    const enteredSalePercent = readSalePercent(productForm.salePercent);
+    const salePercent = resolveFormSalePercent(productForm, firstVariant);
+    const salePrice = enteredSalePercent !== null
+      ? calculateSalePrice(originalPrice, enteredSalePercent)
+      : Number(firstVariant.salePrice || 0);
 
-    if (salePercent === null || !Number.isFinite(salePrice)) {
+    if (
+      salePercent === null ||
+      salePercent <= 0 ||
+      salePercent >= 100 ||
+      salePrice === null ||
+      !Number.isFinite(salePrice) ||
+      salePrice <= 0
+    ) {
       return null;
     }
 
     return {
-      originalPrice: Number(firstVariant.price || 0),
+      originalPrice,
       salePercent,
       salePrice,
     };
-  }, [productVariantRows]);
+  }, [productForm, productVariantRows]);
   const productFormErrors = useMemo(() => {
+    const salePercent = readSalePercent(productForm.salePercent);
+    const salePercentError = productForm.salePercent !== "" &&
+      (salePercent === null || salePercent < 0 || salePercent >= 100)
+      ? "Giảm giá phải từ 0 đến dưới 100%."
+      : "";
     const skuCounts = productVariantRows.reduce((acc, variant) => {
       const sku = normalizeSelectValue(variant.sku);
 
@@ -1288,10 +1759,13 @@ export default function AdminDashboardPage() {
     });
 
     return {
-      hasErrors: variants.some((errors) => Object.keys(errors).length > 0),
+      hasErrors:
+        Boolean(salePercentError) ||
+        variants.some((errors) => Object.keys(errors).length > 0),
+      salePercent: salePercentError,
       variants,
     };
-  }, [productVariantRows]);
+  }, [productForm.salePercent, productVariantRows]);
   const brandOptions = useMemo(() => {
     const options = dedupeBrandOptions(brands);
 
@@ -1326,6 +1800,11 @@ export default function AdminDashboardPage() {
     return options;
   }, [categories, productForm.categoryId, productForm.categoryName]);
   const handleTab = (nextTab) => {
+    if (nextTab === "orders") {
+      navigate("/admin/orders");
+      return;
+    }
+
     setSearchParams(nextTab === "dashboard" ? {} : { tab: nextTab });
   };
 
@@ -1338,12 +1817,37 @@ export default function AdminDashboardPage() {
     if (tabKey === "products") {
       setProductPage(1);
     }
+
+    if (tabKey === "staff") {
+      setStaffPage(1);
+    }
+
+    if (tabKey === "customers") {
+      setCustomerPage(1);
+    }
   };
 
   const handleProductPageChange = (nextPage) => {
     setProductPage(
       Math.min(Math.max(1, nextPage), Math.max(productPagination.lastPage, 1)),
     );
+  };
+
+  const handleStaffPageChange = (nextPage) => {
+    setStaffPage(
+      Math.min(Math.max(1, nextPage), Math.max(staffPagination.lastPage, 1)),
+    );
+  };
+
+  const handleCustomerPageChange = (nextPage) => {
+    setCustomerPage(
+      Math.min(Math.max(1, nextPage), Math.max(customerPagination.lastPage, 1)),
+    );
+  };
+
+  const handleCustomerStatusFilterChange = (event) => {
+    setCustomerStatusFilter(event.target.value);
+    setCustomerPage(1);
   };
 
   const handleProductChange = (event) => {
@@ -1381,16 +1885,6 @@ export default function AdminDashboardPage() {
         ),
       };
     });
-  };
-
-  const handleProductSeoChange = (field, value) => {
-    setProductForm((current) => ({
-      ...current,
-      seo: {
-        ...current.seo,
-        [field]: value,
-      },
-    }));
   };
 
   const handleProductDescriptionChange = (value) => {
@@ -1893,7 +2387,6 @@ export default function AdminDashboardPage() {
       imageUrl: thumbnailImage?.imageUrl || "",
       price: normalizedProduct.price || firstVariant.price || "",
       salePercent: normalizedProduct.salePercent ?? rawProduct.sale_percent ?? "",
-      seo: productMeta.seo,
       shortDescription:
         productMeta.shortDescription ||
         rawProduct.short_description ||
@@ -1971,11 +2464,13 @@ export default function AdminDashboardPage() {
     const slug = productForm.slug || slugify(productForm.name);
     const firstVariant = productVariantRows[0] || {};
     const price = Number(firstVariant.price || productForm.price || 0);
-    const salePercent = calculateSalePercentFromPrice(
-      firstVariant.price,
-      firstVariant.salePrice,
+    const salePercent = resolveFormSalePercent(productForm, firstVariant);
+    const variants = productVariantsToPayload(
+      productVariantRows,
+      slug,
+      price,
+      salePercent,
     );
-    const variants = productVariantsToPayload(productVariantRows, slug, price);
 
     if (!categoryId || !brandId) {
       setSaving(false);
@@ -2003,7 +2498,6 @@ export default function AdminDashboardPage() {
       description: productForm.description,
       specifications: productSpecGroupsToObject(productForm.specifications, {
         featured: productForm.featured,
-        seo: productForm.seo,
         shortDescription: productForm.shortDescription,
       }),
       price,
@@ -2288,6 +2782,139 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const resetStaffForm = () => {
+    setStaffForm(emptyStaffForm);
+    setEditingStaffId(null);
+    setStaffFormOpen(false);
+  };
+
+  const openCreateStaffForm = () => {
+    setStaffForm(emptyStaffForm);
+    setEditingStaffId(null);
+    setStaffFormOpen(true);
+  };
+
+  const openEditStaffForm = (staffMember) => {
+    setStaffForm({
+      avatar: staffMember.avatar || "",
+      email: staffMember.email || "",
+      fullName: staffMember.name || "",
+      password: "",
+      phone: staffMember.phone || "",
+      status: staffMember.status || "active",
+    });
+    setEditingStaffId(staffMember.id);
+    setStaffFormOpen(true);
+  };
+
+  const handleStaffFormChange = (event) => {
+    setStaffForm((current) => ({
+      ...current,
+      [event.target.name]: event.target.value,
+    }));
+  };
+
+  const createStaffPayload = () => {
+    const payload = {
+      avatar: staffForm.avatar.trim(),
+      email: staffForm.email.trim(),
+      full_name: staffForm.fullName.trim(),
+      phone: staffForm.phone.trim(),
+      status: staffForm.status,
+    };
+    const password = staffForm.password.trim();
+
+    if (password) {
+      payload.password = password;
+    }
+
+    return payload;
+  };
+
+  const handleSaveStaff = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const payload = createStaffPayload();
+
+      if (editingStaffId) {
+        await adminService.updateStaff(editingStaffId, payload);
+        setMessage("Da cap nhat staff.");
+      } else {
+        await adminService.createStaff(payload);
+        setMessage("Da them staff.");
+      }
+
+      resetStaffForm();
+      await loadAdminData();
+    } catch (err) {
+      setMessage(getApiErrorMessage(err, "Khong luu duoc staff."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteStaff = async (staffMember) => {
+    if (!window.confirm(`Xoa staff ${staffMember.name}?`)) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      await adminService.deleteStaff(staffMember.id);
+      setMessage("Da xoa staff.");
+      await loadAdminData();
+    } catch (err) {
+      setMessage(getApiErrorMessage(err, "Khong xoa duoc staff."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleCustomerLock = async (customer) => {
+    setSaving(true);
+    setMessage("");
+
+    try {
+      if (isUserLocked(customer)) {
+        await adminService.unlockCustomer(customer.id);
+        setMessage("Da mo khoa customer.");
+      } else {
+        await adminService.lockCustomer(customer.id);
+        setMessage("Da khoa customer.");
+      }
+
+      await loadAdminData();
+    } catch (err) {
+      setMessage(getApiErrorMessage(err, "Khong cap nhat duoc customer."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteCustomer = async (customer) => {
+    if (!window.confirm(`Xoa customer ${customer.name}?`)) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      await adminService.deleteCustomer(customer.id);
+      setMessage("Da xoa customer.");
+      await loadAdminData();
+    } catch (err) {
+      setMessage(getApiErrorMessage(err, "Khong xoa duoc customer."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleUserRoleChange = async (user, roleId) => {
     setSaving(true);
     setMessage("");
@@ -2317,6 +2944,10 @@ export default function AdminDashboardPage() {
       setSaving(false);
     }
   };
+
+  if (![USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) || !allowedTabs.has(tab)) {
+    return <Navigate replace to="/403" />;
+  }
 
   return (
     <section className={`admin-dashboard admin-dashboard--${tab}`}>
@@ -2365,6 +2996,16 @@ export default function AdminDashboardPage() {
             </div>
           </div>
         </div>
+      ) : null}
+      {staffFormOpen ? (
+        <StaffFormModal
+          editingStaffId={editingStaffId}
+          form={staffForm}
+          onChange={handleStaffFormChange}
+          onClose={resetStaffForm}
+          onSubmit={handleSaveStaff}
+          saving={saving}
+        />
       ) : null}
 
       {tab === "dashboard" ? (
@@ -2569,7 +3210,6 @@ export default function AdminDashboardPage() {
               onRemoveVariant={handleRemoveProductVariant}
               onRemoveVariantSpec={handleRemoveVariantSpec}
               onSave={handleSaveProduct}
-              onSeoChange={handleProductSeoChange}
               onSetThumbnail={handleSetProductThumbnail}
               onSpecChange={handleProductSpecChange}
               onSpecGroupChange={handleProductSpecGroupChange}
@@ -3177,6 +3817,233 @@ export default function AdminDashboardPage() {
         </>
       ) : null}
 
+      {tab === "staff" ? (
+        <>
+          <div className="admin-page-heading">
+            <div>
+              <h1>Staff Management</h1>
+              <p>Manage employee accounts and internal access.</p>
+            </div>
+            <button
+              className="admin-primary-action"
+              onClick={openCreateStaffForm}
+              type="button"
+            >
+              + Add Staff
+            </button>
+          </div>
+          <div className="order-metric-row">
+            <article>
+              <span className="metric-icon metric-icon--blue">S</span>
+              <div>
+                <small>Total Staff</small>
+                <strong>{staffPagination.total || staff.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--green">A</span>
+              <div>
+                <small>Active</small>
+                <strong>{staff.filter((item) => item.status === "active").length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--red">L</span>
+              <div>
+                <small>Locked</small>
+                <strong>{staff.filter(isUserLocked).length}</strong>
+              </div>
+            </article>
+          </div>
+          <div className="admin-table-wrap">
+            <AdminTabSearch
+              onChange={(value) => handleTabSearchChange("staff", value)}
+              placeholder="Search staff..."
+              value={tabSearch.staff}
+            />
+            <table className="admin-table admin-user-table">
+              <thead>
+                <tr>
+                  <th>Avatar</th>
+                  <th>Ho ten</th>
+                  <th>Email</th>
+                  <th>Status</th>
+                  <th>Ngay tao</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staff.map((staffMember) => (
+                  <tr key={staffMember.id}>
+                    <td>
+                      <AdminUserAvatar user={staffMember} />
+                    </td>
+                    <td>
+                      <strong>{staffMember.name}</strong>
+                    </td>
+                    <td>{staffMember.email}</td>
+                    <td>
+                      <StatusPill>{staffMember.status}</StatusPill>
+                    </td>
+                    <td>{formatAdminDate(staffMember.createdAt)}</td>
+                    <td>
+                      <button
+                        disabled={saving}
+                        onClick={() => openEditStaffForm(staffMember)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        disabled={saving}
+                        onClick={() => handleDeleteStaff(staffMember)}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {staff.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">No staff found.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+            <AdminPagination
+              disabled={loading}
+              label="Staff"
+              onPageChange={handleStaffPageChange}
+              pagination={staffPagination}
+            />
+          </div>
+        </>
+      ) : null}
+
+      {tab === "customers" ? (
+        <>
+          <div className="admin-page-heading">
+            <div>
+              <h1>Customer Management</h1>
+              <p>Search, filter, lock, unlock and manage customer accounts.</p>
+            </div>
+          </div>
+          <div className="order-metric-row">
+            <article>
+              <span className="metric-icon metric-icon--blue">C</span>
+              <div>
+                <small>Total Customers</small>
+                <strong>{customerPagination.total || customers.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--green">A</span>
+              <div>
+                <small>Active</small>
+                <strong>{customers.filter((item) => item.status === "active").length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--red">L</span>
+              <div>
+                <small>Locked</small>
+                <strong>{customers.filter(isUserLocked).length}</strong>
+              </div>
+            </article>
+          </div>
+          <div className="admin-filter-card admin-user-filters">
+            <label>
+              Status
+              <select
+                onChange={handleCustomerStatusFilterChange}
+                value={customerStatusFilter}
+              >
+                {CUSTOMER_STATUS_FILTERS.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={() => {
+                setCustomerStatusFilter("all");
+                setCustomerPage(1);
+              }}
+              type="button"
+            >
+              Clear filter
+            </button>
+          </div>
+          <div className="admin-table-wrap">
+            <AdminTabSearch
+              onChange={(value) => handleTabSearchChange("customers", value)}
+              placeholder="Search customers..."
+              value={tabSearch.customers}
+            />
+            <table className="admin-table admin-user-table">
+              <thead>
+                <tr>
+                  <th>Avatar</th>
+                  <th>Ho ten</th>
+                  <th>Email</th>
+                  <th>Status</th>
+                  <th>Ngay tao</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customers.map((customer) => (
+                  <tr key={customer.id}>
+                    <td>
+                      <AdminUserAvatar user={customer} />
+                    </td>
+                    <td>
+                      <strong>{customer.name}</strong>
+                    </td>
+                    <td>{customer.email}</td>
+                    <td>
+                      <StatusPill>{customer.status}</StatusPill>
+                    </td>
+                    <td>{formatAdminDate(customer.createdAt)}</td>
+                    <td>
+                      <button
+                        disabled={saving}
+                        onClick={() => handleToggleCustomerLock(customer)}
+                        type="button"
+                      >
+                        {isUserLocked(customer) ? "Unlock" : "Lock"}
+                      </button>
+                      {canManageCustomers ? (
+                        <button
+                          disabled={saving}
+                          onClick={() => handleDeleteCustomer(customer)}
+                          type="button"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {customers.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">No customers found.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+            <AdminPagination
+              disabled={loading}
+              label="Customers"
+              onPageChange={handleCustomerPageChange}
+              pagination={customerPagination}
+            />
+          </div>
+        </>
+      ) : null}
+
       {tab === "users" ? (
         <>
           <div className="admin-page-heading">
@@ -3208,7 +4075,11 @@ export default function AdminDashboardPage() {
               <div>
                 <small>Admins</small>
                 <strong>
-                  {users.filter((user) => user.role.toLowerCase().includes("admin")).length}
+                  {users.filter((managedUser) =>
+                    managedUser.role
+                      .toLowerCase()
+                      .includes(USER_ROLES.ADMIN.toLowerCase()),
+                  ).length}
                 </strong>
               </div>
             </article>
@@ -3238,32 +4109,32 @@ export default function AdminDashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map((user) => (
-                  <tr key={user.id}>
+                {filteredUsers.map((managedUser) => (
+                  <tr key={managedUser.id}>
                     <td>
                       <div className="admin-person">
-                        <span>{initials(user.name)}</span>
+                        <span>{initials(managedUser.name)}</span>
                         <div>
-                          <strong>{user.name}</strong>
-                          <small>{user.email}</small>
+                          <strong>{managedUser.name}</strong>
+                          <small>{managedUser.email}</small>
                         </div>
                       </div>
                     </td>
-                    <td>{user.phone}</td>
+                    <td>{managedUser.phone}</td>
                     <td>
-                      <StatusPill>{user.status}</StatusPill>
+                      <StatusPill>{managedUser.status}</StatusPill>
                     </td>
                     <td>
                       <select
                         className="admin-role-select"
                         disabled={saving || roles.length === 0}
                         onChange={(event) =>
-                          handleUserRoleChange(user, event.target.value)
+                          handleUserRoleChange(managedUser, event.target.value)
                         }
-                        value={String(user.roleId)}
+                        value={String(managedUser.roleId)}
                       >
                         {roles.length === 0 ? (
-                          <option value={user.roleId}>{user.role}</option>
+                          <option value={managedUser.roleId}>{managedUser.role}</option>
                         ) : null}
                         {roles.map((role) => (
                           <option key={role.id} value={role.id}>

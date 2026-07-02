@@ -22,14 +22,6 @@ function cartStorageKey(userId) {
   return `bstore_cart_id_${userId}`;
 }
 
-function getStoredCartId(userId) {
-  if (!userId) {
-    return "";
-  }
-
-  return localStorage.getItem(cartStorageKey(userId)) || "";
-}
-
 function setStoredCartId(userId, cartId) {
   if (!userId || !cartId) {
     return;
@@ -44,6 +36,26 @@ function removeStoredCartId(userId) {
   }
 
   localStorage.removeItem(cartStorageKey(userId));
+}
+
+function isOpenCart(cart = {}) {
+  return !["cancelled", "completed", "ordered", "paid"].includes(
+    String(cart.status || "active").toLowerCase(),
+  );
+}
+
+function findActiveUserCart(carts = [], userId) {
+  return (
+    carts.find((cart) => {
+      const cartUserId = cart.user_id ?? cart.userId ?? cart.user?.id;
+      const belongsToUser =
+        cartUserId === undefined ||
+        cartUserId === null ||
+        String(cartUserId) === String(userId);
+
+      return belongsToUser && isOpenCart(cart);
+    }) || null
+  );
 }
 
 function productToCartPayload(product, quantity) {
@@ -83,7 +95,7 @@ function productToCartPayload(product, quantity) {
 export function CartProvider({ children }) {
   const { isAuthenticated, user } = useAuth();
   const userId = user?.id;
-  const [cartId, setCartId] = useState(getStoredCartId(userId));
+  const [cartId, setCartId] = useState("");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -91,13 +103,23 @@ export function CartProvider({ children }) {
   const applyCart = useCallback(
     (cart) => {
       if (!cart) {
+        removeStoredCartId(userId);
         setCartId("");
         setItems([]);
         return [];
       }
 
-      setStoredCartId(userId, cart.id);
-      setCartId(String(cart.id));
+      const nextCartId = cart.id ?? cart.cart_id ?? cart.cartId;
+
+      if (!nextCartId) {
+        removeStoredCartId(userId);
+        setCartId("");
+        setItems([]);
+        return [];
+      }
+
+      setStoredCartId(userId, nextCartId);
+      setCartId(String(nextCartId));
 
       const list = readCollection(cart, ["items", "cart_items"]).map(
         normalizeCartItem,
@@ -119,25 +141,9 @@ export function CartProvider({ children }) {
     setError("");
 
     try {
-      const storedCartId = getStoredCartId(userId);
-
-      if (storedCartId) {
-        try {
-          const cart = await cartService.getCart(storedCartId);
-          return applyCart(cart);
-        } catch {
-          removeStoredCartId(userId);
-        }
-      }
-
       const payload = await cartService.getCarts();
       const carts = readCollection(payload, ["carts"]);
-      const activeCart =
-        carts.find(
-          (cart) =>
-            Number(cart.user_id) === Number(userId) &&
-            String(cart.status || "active").toLowerCase() !== "ordered",
-        ) || null;
+      const activeCart = findActiveUserCart(carts, userId);
 
       return applyCart(activeCart);
     } catch (err) {
@@ -166,8 +172,22 @@ export function CartProvider({ children }) {
       const existingItem = items.find(
         (item) => Number(item.variantId) === Number(itemPayload.product_variant_id),
       );
+      let targetCartId = cartId;
 
-      if (!cartId) {
+      if (!targetCartId) {
+        const payload = await cartService.getCarts();
+        const activeCart = findActiveUserCart(
+          readCollection(payload, ["carts"]),
+          userId,
+        );
+
+        if (activeCart) {
+          applyCart(activeCart);
+          targetCartId = activeCart.id;
+        }
+      }
+
+      if (!targetCartId) {
         const cart = await cartService.createCart({
           user_id: userId,
           status: "active",
@@ -185,7 +205,7 @@ export function CartProvider({ children }) {
       } else {
         await cartService.addItem({
           ...itemPayload,
-          cart_id: Number(cartId),
+          cart_id: Number(targetCartId),
         });
       }
 

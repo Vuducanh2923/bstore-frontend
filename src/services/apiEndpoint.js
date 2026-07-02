@@ -3,6 +3,11 @@ export const API_ENDPOINTS = {
     register: "/auth/register",
     login: "/auth/login",
     me: "/auth/me",
+    verifyRegisterOtp: "/auth/verify-register-otp",
+    resendRegisterOtp: "/auth/resend-register-otp",
+    forgotPassword: "/auth/forgot-password",
+    verifyForgotPasswordOtp: "/auth/verify-forgot-password-otp",
+    resetPassword: "/auth/reset-password",
   },
   products: {
     list: "/products",
@@ -25,10 +30,21 @@ export const API_ENDPOINTS = {
   uploads: {
     image: "/uploads/images",
   },
+  profile: {
+    detail: "/profile",
+    addresses: "/profile/addresses",
+    address: (addressId) => `/profile/addresses/${encodeURIComponent(addressId)}`,
+    defaultAddress: (addressId) =>
+      `/profile/addresses/${encodeURIComponent(addressId)}/default`,
+    changePassword: "/profile/change-password",
+  },
+  customer: {
+    orders: "/customer/orders",
+    order: (orderId) => `/customer/orders/${encodeURIComponent(orderId)}`,
+  },
   cart: {
     list: "/carts",
     create: "/carts",
-    detail: (cartId) => `/carts/${encodeURIComponent(cartId)}`,
     items: "/cart-items",
     item: (cartItemId) => `/cart-items/${encodeURIComponent(cartItemId)}`,
   },
@@ -40,6 +56,8 @@ export const API_ENDPOINTS = {
   payments: {
     list: "/payments",
     create: "/payments",
+    vnpayCreate: "/payments/vnpay/create",
+    vnpayReturn: "/payments/vnpay/return",
   },
   admin: {
     products: "/products",
@@ -55,10 +73,20 @@ export const API_ENDPOINTS = {
     roles: "/roles",
     users: "/users",
     user: (userId) => `/users/${encodeURIComponent(userId)}`,
+    staff: "/admin/staff",
+    staffMember: (staffId) => `/admin/staff/${encodeURIComponent(staffId)}`,
+    staffStatus: (staffId) =>
+      `/admin/staff/${encodeURIComponent(staffId)}/status`,
+    customers: "/admin/customers",
+    customer: (customerId) => `/admin/customers/${encodeURIComponent(customerId)}`,
+    customerStatus: (customerId) =>
+      `/admin/customers/${encodeURIComponent(customerId)}/status`,
     inventory: "/inventories",
     inventoryItem: (inventoryId) =>
       `/inventories/${encodeURIComponent(inventoryId)}`,
-    orders: "/orders",
-    order: (orderId) => `/orders/${encodeURIComponent(orderId)}`,
+    orders: "/admin/orders",
+    order: (orderId) => `/admin/orders/${encodeURIComponent(orderId)}`,
+    orderStatus: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/status`,
   },
 };

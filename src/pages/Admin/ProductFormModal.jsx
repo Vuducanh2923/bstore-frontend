@@ -52,7 +52,6 @@ export default function ProductFormModal({
   onRemoveVariant,
   onRemoveVariantSpec,
   onSave,
-  onSeoChange,
   onSetThumbnail,
   onSpecChange,
   onSpecGroupChange,
@@ -79,9 +78,7 @@ export default function ProductFormModal({
     productForm.brandId,
     productForm.brandName,
   );
-  const seoTitle = productForm.seo?.metaTitle || productForm.name;
-  const seoDescription =
-    productForm.seo?.metaDescription || productForm.shortDescription;
+  const salePercentError = productFormErrors?.salePercent;
 
   return (
     <div className="product-form-backdrop" role="presentation">
@@ -230,9 +227,46 @@ export default function ProductFormModal({
             </section>
 
             <section className="product-form-panel">
+              <div className="product-panel-title">
+                <span aria-hidden="true">2</span>
+                <h3>Giảm giá</h3>
+              </div>
+
+              <div className="product-field-grid">
+                <label className="product-field">
+                  <span>Giảm giá (%)</span>
+                  <input
+                    max="99"
+                    min="0"
+                    name="salePercent"
+                    onChange={onChange}
+                    step="0.01"
+                    type="number"
+                    value={productForm.salePercent}
+                  />
+                  {salePercentError ? <em>{salePercentError}</em> : null}
+                </label>
+
+                <div className="product-sale-summary">
+                  <span>Giá sau giảm</span>
+                  <strong>
+                    {salePreview
+                      ? formatCurrency(salePreview.salePrice)
+                      : "Chưa áp dụng"}
+                  </strong>
+                  <small>
+                    {salePreview
+                      ? `Từ ${formatCurrency(salePreview.originalPrice)} · giảm ${formatSalePercent(salePreview.salePercent)}%`
+                      : "Nhập giá bán ở biến thể và phần trăm giảm giá."}
+                  </small>
+                </div>
+              </div>
+            </section>
+
+            <section className="product-form-panel">
               <div className="admin-section-title">
                 <div className="product-panel-title">
-                  <span aria-hidden="true">2</span>
+                  <span aria-hidden="true">3</span>
                   <h3>Biến thể sản phẩm</h3>
                 </div>
                 <button onClick={onAddVariant} type="button">
@@ -490,7 +524,7 @@ export default function ProductFormModal({
             <section className="product-form-panel">
               <div className="admin-section-title">
                 <div className="product-panel-title">
-                  <span aria-hidden="true">3</span>
+                  <span aria-hidden="true">4</span>
                   <h3>Thông số kỹ thuật</h3>
                 </div>
                 <button onClick={onAddProductSpecGroup} type="button">
@@ -569,57 +603,6 @@ export default function ProductFormModal({
                     </button>
                   </article>
                 ))}
-              </div>
-            </section>
-
-            <section className="product-form-panel">
-              <div className="product-panel-title">
-                <span aria-hidden="true">4</span>
-                <h3>SEO</h3>
-              </div>
-
-              <div className="seo-preview-card">
-                <strong>{seoTitle || "Tiêu đề SEO"}</strong>
-                <span>
-                  https://bstore.vn/products/{productForm.slug || "san-pham"}
-                </span>
-                <p>{seoDescription || "Mô tả hiển thị trên công cụ tìm kiếm."}</p>
-              </div>
-
-              <div className="product-field-grid">
-                <label className="product-field product-field--full">
-                  <span>Meta title</span>
-                  <input
-                    maxLength="70"
-                    onChange={(event) => onSeoChange("metaTitle", event.target.value)}
-                    value={productForm.seo?.metaTitle || ""}
-                  />
-                  <small>{(productForm.seo?.metaTitle || "").length}/70</small>
-                </label>
-                <label className="product-field product-field--full">
-                  <span>Meta description</span>
-                  <textarea
-                    maxLength="160"
-                    onChange={(event) =>
-                      onSeoChange("metaDescription", event.target.value)
-                    }
-                    rows="3"
-                    value={productForm.seo?.metaDescription || ""}
-                  />
-                  <small>
-                    {(productForm.seo?.metaDescription || "").length}/160
-                  </small>
-                </label>
-                <label className="product-field product-field--full">
-                  <span>Meta keywords</span>
-                  <input
-                    onChange={(event) =>
-                      onSeoChange("metaKeywords", event.target.value)
-                    }
-                    placeholder="iphone, apple, dien thoai"
-                    value={productForm.seo?.metaKeywords || ""}
-                  />
-                </label>
               </div>
             </section>
           </main>

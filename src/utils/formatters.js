@@ -101,37 +101,34 @@ export function getProductSaleInfo(product = {}) {
   };
 }
 
-export function normalizeRole(role) {
-  const rawRole = Array.isArray(role) ? role[0] : role;
+export const USER_ROLES = Object.freeze({
+  ADMIN: "ADMIN",
+  CUSTOMER: "CUSTOMER",
+  STAFF: "STAFF",
+});
 
-  if (typeof rawRole === "number") {
-    return rawRole === 1 ? "admin" : "customer";
+export function getRole(user = {}) {
+  const directRole = user?.role_name || user?.roleName || user?.role;
+
+  if (typeof directRole === "string" && directRole.trim()) {
+    return directRole.trim().toUpperCase();
   }
 
-  const value =
-    typeof rawRole === "object"
-      ? rawRole?.name || rawRole?.authority || rawRole?.role || rawRole?.id
-      : rawRole;
-
-  if (typeof value === "number") {
-    return value === 1 ? "admin" : "customer";
+  if (!directRole || typeof directRole !== "object") {
+    return null;
   }
 
-  const normalized = String(value || "customer")
-    .toLowerCase()
-    .replace("role_", "");
+  const roleName = directRole.name;
 
-  if (normalized.includes("admin") || normalized === "1") {
-    return "admin";
+  if (typeof roleName !== "string" || !roleName.trim()) {
+    return null;
   }
 
-  return "customer";
+  return roleName.trim().toUpperCase();
 }
 
 export function getUserRole(user = {}) {
-  return normalizeRole(
-    user.role?.name || user.role || user.roles || user.authorities || user.role_id,
-  );
+  return getRole(user);
 }
 
 function getApiOrigin() {
@@ -593,13 +590,29 @@ export function normalizeCartItem(item = {}) {
 }
 
 export function getPaymentRedirectUrl(payload = {}) {
-  return (
-    payload.paymentUrl ||
-    payload.payment_url ||
-    payload.checkoutUrl ||
-    payload.checkout_url ||
-    payload.redirectUrl ||
-    payload.redirect_url ||
-    payload.url
-  );
+  const containers = [
+    payload,
+    payload.data,
+    payload.payment,
+    payload.paymentData,
+    payload.payment_data,
+    payload.vnpay,
+  ].filter(Boolean);
+
+  for (const container of containers) {
+    const redirectUrl =
+      container.paymentUrl ||
+      container.payment_url ||
+      container.checkoutUrl ||
+      container.checkout_url ||
+      container.redirectUrl ||
+      container.redirect_url ||
+      container.url;
+
+    if (redirectUrl) {
+      return redirectUrl;
+    }
+  }
+
+  return "";
 }

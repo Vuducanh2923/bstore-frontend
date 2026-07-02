@@ -1,5 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { API_ERROR_EVENT } from "../services/api";
 
 const ToastContext = createContext(null);
 
@@ -18,6 +26,19 @@ export function ToastProvider({ children }) {
     },
     [removeToast],
   );
+
+  useEffect(() => {
+    const handleApiError = (event) => {
+      const message = event.detail?.message;
+
+      if (message) {
+        showToast(message, event.detail?.type || "error");
+      }
+    };
+
+    window.addEventListener(API_ERROR_EVENT, handleApiError);
+    return () => window.removeEventListener(API_ERROR_EVENT, handleApiError);
+  }, [showToast]);
 
   const value = useMemo(() => ({ showToast }), [showToast]);
 

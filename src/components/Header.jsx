@@ -13,9 +13,11 @@ import {
   resolveCatalogSearchPath,
 } from "../utils/catalogLinks";
 import {
+  getRole,
   normalizeProductSummary,
   resolveMediaUrl,
   slugify,
+  USER_ROLES,
 } from "../utils/formatters";
 import HeaderMenu from "./HeaderMenu";
 
@@ -249,7 +251,7 @@ async function loadCategoryBrands(categories, publicBrands) {
 }
 
 function getUserName(user = {}) {
-  return user?.name || user?.fullName || user?.email || "BStore";
+  return user?.full_name || user?.name || user?.fullName || user?.email || "BStore";
 }
 
 function getUserInitials(value) {
@@ -278,7 +280,9 @@ function AccountAvatar({ user }) {
 }
 
 export default function Header() {
-  const { isAuthenticated, logout, role, user } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
+  const currentRole = getRole(user);
+  const backOfficeHref = [USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) ? "/admin" : "";
   const { totalQuantity } = useCart();
   const [brandsByCategory, setBrandsByCategory] = useState({});
   const [brands, setBrands] = useState([]);
@@ -613,8 +617,13 @@ export default function Header() {
               </button>
               <div className="account-popover">
                 <strong>{getUserName(user)}</strong>
-                {role === "admin" ? (
-                  <Link onClick={closeMobileMenu} to="/admin">
+                {currentRole === USER_ROLES.CUSTOMER ? (
+                  <Link onClick={closeMobileMenu} to="/account">
+                    Tài khoản
+                  </Link>
+                ) : null}
+                {backOfficeHref ? (
+                  <Link onClick={closeMobileMenu} to={backOfficeHref}>
                     Admin
                   </Link>
                 ) : null}

@@ -13,8 +13,8 @@ import {
   getToken,
   setAuthSession,
 } from "../services/api";
-import { authService } from "../services/bstoreService";
-import { getUserRole, normalizeRole } from "../utils/formatters";
+import authApi from "../services/authApi";
+import { getRole } from "../utils/formatters";
 
 const AuthContext = createContext(null);
 
@@ -50,16 +50,17 @@ function extractAuth(payload) {
     decoded ||
     null;
 
+  if (!token) {
+    throw new Error("API đăng nhập chưa trả về token xác thực.");
+  }
+
   if (!user) {
     throw new Error("API đăng nhập chưa trả về thông tin người dùng.");
   }
 
   return {
     token,
-    user: {
-      ...user,
-      role: getUserRole(user),
-    },
+    user,
   };
 }
 
@@ -79,26 +80,37 @@ export function AuthProvider({ children }) {
   }, [logout]);
 
   const login = useCallback(async (credentials) => {
-    const payload = await authService.login(credentials);
-    const auth = extractAuth(payload);
+    clearAuthSession();
+    setToken(null);
+    setUser(null);
 
-    setAuthSession(auth.token, auth.user);
-    setToken(auth.token || null);
-    setUser(auth.user);
-    return auth;
+    try {
+      const payload = await authApi.login(credentials);
+      const auth = extractAuth(payload);
+
+      setAuthSession(auth.token, auth.user);
+      setToken(auth.token);
+      setUser(auth.user);
+      return auth;
+    } catch (error) {
+      clearAuthSession();
+      setToken(null);
+      setUser(null);
+      throw error;
+    }
   }, []);
 
   const register = useCallback(async (formData) => {
-    return authService.register(formData);
+    return authApi.register(formData);
   }, []);
 
   const value = useMemo(
     () => ({
-      isAuthenticated: Boolean(user || token),
+      isAuthenticated: Boolean(token),
       login,
       logout,
       register,
-      role: normalizeRole(user?.role || user?.role_id),
+      role: getRole(user),
       token,
       user,
     }),

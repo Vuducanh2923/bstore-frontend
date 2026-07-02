@@ -1,11 +1,41 @@
-import api, { readCollection, unwrapResponse } from "./api";
+import api, { getToken, readCollection, unwrapResponse } from "./api";
 import { API_ENDPOINTS } from "./apiEndpoint";
+import authApi from "./authApi";
+import orderApi from "./orderApi";
 
 const toPayload = (request) => request.then(unwrapResponse);
 const toBody = (request) => request.then((response) => response.data);
 const isFormDataPayload = (payload) =>
   typeof FormData !== "undefined" && payload instanceof FormData;
 const ADMIN_BRANDS_PAGE_SIZE = 100;
+
+function normalizeVnpayPaymentPayload(payload = {}) {
+  const orderId = payload.order_id ?? payload.orderId;
+  const amount = payload.amount;
+
+  if (orderId === null || orderId === undefined || orderId === "") {
+    throw new Error("Không thể tạo thanh toán VNPAY vì thiếu order_id.");
+  }
+
+  if (amount === null || amount === undefined || amount === "") {
+    throw new Error("Không thể tạo thanh toán VNPAY vì thiếu amount.");
+  }
+
+  const numericAmount = Number(amount);
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error("Số tiền thanh toán VNPAY không hợp lệ.");
+  }
+
+  return {
+    order_id: orderId,
+    amount: numericAmount,
+    order_info:
+      payload.order_info ||
+      payload.orderInfo ||
+      `Thanh toán đơn hàng #${orderId}`,
+  };
+}
 
 function getPaginationValue(payload = {}, key, fallback = undefined) {
   const meta = payload.meta || payload.pagination || {};
@@ -130,12 +160,7 @@ async function getAllAdminBrands(params = {}) {
   }
 }
 
-export const authService = {
-  register: (payload) =>
-    toPayload(api.post(API_ENDPOINTS.auth.register, payload)),
-  login: (payload) => toPayload(api.post(API_ENDPOINTS.auth.login, payload)),
-  me: () => toPayload(api.get(API_ENDPOINTS.auth.me)),
-};
+export const authService = authApi;
 
 export const productService = {
   getProducts: (params) =>
@@ -163,9 +188,31 @@ export const uploadService = {
   },
 };
 
+export const profileService = {
+  getProfile: () => toPayload(api.get(API_ENDPOINTS.profile.detail)),
+  updateProfile: (payload) =>
+    toPayload(api.put(API_ENDPOINTS.profile.detail, payload)),
+  getAddresses: () => toPayload(api.get(API_ENDPOINTS.profile.addresses)),
+  createAddress: (payload) =>
+    toPayload(api.post(API_ENDPOINTS.profile.addresses, payload)),
+  updateAddress: (addressId, payload) =>
+    toPayload(api.put(API_ENDPOINTS.profile.address(addressId), payload)),
+  deleteAddress: (addressId) =>
+    toPayload(api.delete(API_ENDPOINTS.profile.address(addressId))),
+  setDefaultAddress: (addressId) =>
+    toPayload(api.patch(API_ENDPOINTS.profile.defaultAddress(addressId))),
+  changePassword: (payload) =>
+    toPayload(api.put(API_ENDPOINTS.profile.changePassword, payload)),
+};
+
+export const customerOrderService = {
+  getOrders: () => toPayload(api.get(API_ENDPOINTS.customer.orders)),
+  getOrder: (orderId) =>
+    toPayload(api.get(API_ENDPOINTS.customer.order(orderId))),
+};
+
 export const cartService = {
   getCarts: () => toPayload(api.get(API_ENDPOINTS.cart.list)),
-  getCart: (cartId) => toPayload(api.get(API_ENDPOINTS.cart.detail(cartId))),
   createCart: (payload) => toPayload(api.post(API_ENDPOINTS.cart.create, payload)),
   addItem: (payload) => toPayload(api.post(API_ENDPOINTS.cart.items, payload)),
   updateItem: (cartItemId, payload) =>
@@ -174,16 +221,29 @@ export const cartService = {
     toPayload(api.delete(API_ENDPOINTS.cart.item(cartItemId))),
 };
 
-export const orderService = {
-  createOrder: (payload) =>
-    toPayload(api.post(API_ENDPOINTS.orders.create, payload)),
-  getOrders: () => toPayload(api.get(API_ENDPOINTS.orders.list)),
-  getOrder: (orderId) => toPayload(api.get(API_ENDPOINTS.orders.detail(orderId))),
-};
+export const orderService = orderApi;
 
 export const paymentService = {
   createPayment: (payload) =>
     toPayload(api.post(API_ENDPOINTS.payments.create, payload)),
+  createVnpayPayment: async (payload) => {
+    if (!getToken()) {
+      throw new Error("Vui lòng đăng nhập trước khi thanh toán VNPAY.");
+    }
+
+    const vnpayPayload = normalizeVnpayPaymentPayload(payload);
+
+    console.log("VNPAY payload:", vnpayPayload);
+
+    const response = await api.post(API_ENDPOINTS.payments.vnpayCreate, vnpayPayload);
+    const responsePayload = unwrapResponse(response);
+
+    console.log("VNPAY response:", responsePayload);
+
+    return responsePayload;
+  },
+  verifyVnpayReturn: (queryString = "") =>
+    api.get(`${API_ENDPOINTS.payments.vnpayReturn}${String(queryString || "")}`),
   getPayments: () => toPayload(api.get(API_ENDPOINTS.payments.list)),
 };
 
@@ -215,6 +275,27 @@ export const adminService = {
   getUsers: () => toPayload(api.get(API_ENDPOINTS.admin.users)),
   updateUser: (userId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.user(userId), payload)),
+  getStaff: (params) => toBody(api.get(API_ENDPOINTS.admin.staff, { params })),
+  createStaff: (payload) =>
+    toPayload(api.post(API_ENDPOINTS.admin.staff, payload)),
+  updateStaff: (staffId, payload) =>
+    toPayload(api.put(API_ENDPOINTS.admin.staffMember(staffId), payload)),
+  updateStaffStatus: (staffId, payload) =>
+    toPayload(api.patch(API_ENDPOINTS.admin.staffStatus(staffId), payload)),
+  deleteStaff: (staffId) =>
+    toPayload(api.delete(API_ENDPOINTS.admin.staffMember(staffId))),
+  getCustomers: (params) =>
+    toBody(api.get(API_ENDPOINTS.admin.customers, { params })),
+  getCustomer: (customerId) =>
+    toPayload(api.get(API_ENDPOINTS.admin.customer(customerId))),
+  updateCustomerStatus: (customerId, payload) =>
+    toPayload(api.patch(API_ENDPOINTS.admin.customerStatus(customerId), payload)),
+  lockCustomer: (customerId) =>
+    toPayload(api.patch(API_ENDPOINTS.admin.customerStatus(customerId), { status: "blocked" })),
+  unlockCustomer: (customerId) =>
+    toPayload(api.patch(API_ENDPOINTS.admin.customerStatus(customerId), { status: "active" })),
+  deleteCustomer: (customerId) =>
+    toPayload(api.delete(API_ENDPOINTS.admin.customer(customerId))),
   createProduct: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.products, payload)),
   updateProduct: (productId, payload) =>
@@ -227,6 +308,10 @@ export const adminService = {
   updateInventory: (inventoryId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.inventoryItem(inventoryId), payload)),
   getOrders: () => toPayload(api.get(API_ENDPOINTS.admin.orders)),
+  getOrder: (orderId) =>
+    toPayload(api.get(API_ENDPOINTS.admin.order(orderId))),
+  updateOrderStatus: (orderId, payload) =>
+    toPayload(api.patch(API_ENDPOINTS.admin.orderStatus(orderId), payload)),
   updateOrder: (orderId, payload) =>
-    toPayload(api.put(API_ENDPOINTS.admin.order(orderId), payload)),
+    toPayload(api.patch(API_ENDPOINTS.admin.orderStatus(orderId), payload)),
 };

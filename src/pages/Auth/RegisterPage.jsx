@@ -4,34 +4,53 @@ import StatusMessage from "../../components/StatusMessage";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { getApiErrorMessage } from "../../services/api";
+import {
+  getFieldError,
+  getValidationErrors,
+  isValidationError,
+} from "../../utils/apiErrors";
+
+function FieldError({ children }) {
+  return children ? <small className="field-error">{children}</small> : null;
+}
 
 export default function RegisterPage() {
   const { register } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    fullName: "",
     email: "",
-    phone: "",
+    full_name: "",
     password: "",
-    confirmPassword: "",
+    password_confirmation: "",
+    phone: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [validationErrors, setValidationErrors] = useState({});
 
   const handleChange = (event) => {
+    const { name, value } = event.target;
+
     setForm((current) => ({
       ...current,
-      [event.target.name]: event.target.value,
+      [name]: value,
+    }));
+    setValidationErrors((current) => ({
+      ...current,
+      [name]: "",
     }));
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setValidationErrors({});
 
-    if (form.password !== form.confirmPassword) {
-      setError("Mật khẩu xác nhận không khớp.");
+    if (form.password !== form.password_confirmation) {
+      setValidationErrors({
+        password_confirmation: "Mật khẩu xác nhận không khớp.",
+      });
       return;
     }
 
@@ -39,15 +58,37 @@ export default function RegisterPage() {
 
     try {
       await register({
-        name: form.fullName,
-        fullName: form.fullName,
-        email: form.email,
-        phone: form.phone,
+        email: form.email.trim(),
+        full_name: form.full_name.trim(),
         password: form.password,
+        password_confirmation: form.password_confirmation,
+        phone: form.phone.trim(),
       });
-      showToast("Đăng ký thành công. Vui lòng đăng nhập.", "success");
-      navigate("/login");
+      const successMessage = "Mã xác thực đã được gửi đến email của bạn";
+      showToast(successMessage, "success");
+      navigate("/verify-email", {
+        state: {
+          email: form.email.trim(),
+          message: successMessage,
+          tone: "success",
+          startCooldown: true,
+        },
+      });
     } catch (err) {
+      if (isValidationError(err)) {
+        const errors = getValidationErrors(err);
+        const message =
+          errors.email ||
+          errors.phone ||
+          errors.full_name ||
+          getApiErrorMessage(err, "Dữ liệu đăng ký không hợp lệ.");
+
+        setValidationErrors(errors);
+        setError(message);
+        showToast(message, "error");
+        return;
+      }
+
       const message = getApiErrorMessage(err, "Đăng ký thất bại.");
       setError(message);
       showToast(message, "error");
@@ -68,11 +109,12 @@ export default function RegisterPage() {
             Họ tên
             <input
               autoComplete="name"
-              name="fullName"
+              name="full_name"
               onChange={handleChange}
               required
-              value={form.fullName}
+              value={form.full_name}
             />
+            <FieldError>{getFieldError(validationErrors, "full_name")}</FieldError>
           </label>
           <label>
             Email
@@ -84,6 +126,7 @@ export default function RegisterPage() {
               type="email"
               value={form.email}
             />
+            <FieldError>{getFieldError(validationErrors, "email")}</FieldError>
           </label>
           <label>
             Số điện thoại
@@ -93,28 +136,35 @@ export default function RegisterPage() {
               onChange={handleChange}
               value={form.phone}
             />
+            <FieldError>{getFieldError(validationErrors, "phone")}</FieldError>
           </label>
           <label>
             Mật khẩu
             <input
               autoComplete="new-password"
+              minLength={6}
               name="password"
               onChange={handleChange}
               required
               type="password"
               value={form.password}
             />
+            <FieldError>{getFieldError(validationErrors, "password")}</FieldError>
           </label>
           <label>
             Nhập lại mật khẩu
             <input
               autoComplete="new-password"
-              name="confirmPassword"
+              minLength={6}
+              name="password_confirmation"
               onChange={handleChange}
               required
               type="password"
-              value={form.confirmPassword}
+              value={form.password_confirmation}
             />
+            <FieldError>
+              {getFieldError(validationErrors, "password_confirmation")}
+            </FieldError>
           </label>
           <button className="primary-button" disabled={loading} type="submit">
             {loading ? "Đang đăng ký..." : "Tạo tài khoản"}

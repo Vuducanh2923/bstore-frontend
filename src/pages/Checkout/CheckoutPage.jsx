@@ -1,26 +1,147 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import StatusMessage from "../../components/StatusMessage";
 import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
 import { useToast } from "../../context/ToastContext";
 import { getApiErrorMessage } from "../../services/api";
-import { orderService, paymentService } from "../../services/bstoreService";
-import { formatCurrency } from "../../utils/formatters";
+import { customerOrderService, paymentService } from "../../services/bstoreService";
+import orderApi from "../../services/orderApi";
+import { formatCurrency, getPaymentRedirectUrl } from "../../utils/formatters";
+import { getOrderCode, getOrderId, readOrder } from "../../utils/orders";
+import {
+  clearPendingVnpayPayment,
+  readPendingVnpayPayment,
+  savePendingVnpayPayment,
+} from "../../utils/paymentSession";
+
+const ORDER_SUCCESS_MESSAGE =
+  "Đơn hàng đã được tạo thành công. Thông tin đơn hàng đã được gửi qua email.";
+const VNPAY_REDIRECT_MESSAGE = "Đang chuyển bạn sang cổng thanh toán VNPAY.";
+const VNPAY_PENDING_MESSAGE =
+  "Đơn hàng đã được tạo nhưng chưa thanh toán. Vui lòng bấm Thanh toán lại.";
+const VNPAY_NOT_RETRYABLE_MESSAGE =
+  "Đơn hàng không còn ở trạng thái chờ thanh toán.";
+const PAID_OR_CLOSED_PAYMENT_STATUSES = new Set([
+  "paid",
+  "success",
+  "completed",
+  "cancelled",
+  "canceled",
+  "refunded",
+]);
+
+function normalizeStatus(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function getOrderAmount(order = {}, fallbackAmount = 0) {
+  const amount =
+    order.total_amount ??
+    order.totalAmount ??
+    order.final_amount ??
+    order.finalAmount ??
+    fallbackAmount;
+
+  return amount === null || amount === undefined || amount === ""
+    ? null
+    : Number(amount);
+}
+
+function getInitialPaymentMethod(searchParams) {
+  return String(searchParams.get("payment") || "").toUpperCase() === "VNPAY"
+    ? "VNPAY"
+    : "COD";
+}
+
+function getInitialPendingVnpayOrder() {
+  const pendingPayment = readPendingVnpayPayment();
+
+  if (!pendingPayment?.orderId || !pendingPayment?.amount) {
+    return null;
+  }
+
+  return {
+    amount: Number(pendingPayment.amount),
+    orderCode: pendingPayment.orderCode || "",
+    orderId: pendingPayment.orderId,
+  };
+}
+
+function buildPendingVnpayOrder(order, fallbackAmount) {
+  const createdOrder = readOrder(order);
+  const orderId = getOrderId(createdOrder) || getOrderId(order);
+  const orderCode = getOrderCode(createdOrder) || getOrderCode(order);
+  const amount = getOrderAmount(createdOrder, fallbackAmount);
+
+  if (!orderId) {
+    throw new Error("Không nhận được mã đơn hàng từ backend.");
+  }
+
+  if (amount === null || !Number.isFinite(amount)) {
+    throw new Error("Không nhận được số tiền đơn hàng để thanh toán VNPAY.");
+  }
+
+  return {
+    amount,
+    orderCode,
+    orderId,
+  };
+}
+
+function buildVnpayPayload(pendingOrder) {
+  return {
+    order_id: pendingOrder.orderId,
+    amount: pendingOrder.amount,
+    order_info: `Thanh toán đơn hàng #${pendingOrder.orderId}`,
+  };
+}
+
+function isRetryablePendingOrder(order = {}) {
+  const normalizedOrder = readOrder(order);
+  const orderStatus = normalizeStatus(
+    normalizedOrder.status ||
+      normalizedOrder.order_status ||
+      normalizedOrder.orderStatus,
+  );
+  const paymentStatus = normalizeStatus(
+    normalizedOrder.payment_status ||
+      normalizedOrder.paymentStatus ||
+      normalizedOrder.payment?.status,
+  );
+
+  if (orderStatus && orderStatus !== "pending") {
+    return false;
+  }
+
+  return !PAID_OR_CLOSED_PAYMENT_STATUSES.has(paymentStatus);
+}
 
 export default function CheckoutPage() {
   const { user } = useAuth();
   const { items, refreshCart, removeItem, totalAmount } = useCart();
   const { showToast } = useToast();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialPendingVnpayOrder = getInitialPendingVnpayOrder();
   const [form, setForm] = useState({
     fullName: user?.full_name || user?.name || "",
     phone: user?.phone || "",
     address: "",
     note: "",
-    paymentMethod: "COD",
+    paymentMethod: initialPendingVnpayOrder
+      ? "VNPAY"
+      : getInitialPaymentMethod(searchParams),
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [pendingVnpayOrder, setPendingVnpayOrder] = useState(
+    initialPendingVnpayOrder,
+  );
+  const checkoutInFlightRef = useRef(false);
 
   const handleChange = (event) => {
     setForm((current) => ({
@@ -29,8 +150,76 @@ export default function CheckoutPage() {
     }));
   };
 
+  const redirectToVnpay = async (pendingOrder) => {
+    const vnpayPayload = buildVnpayPayload(pendingOrder);
+    const paymentPayload = await paymentService.createVnpayPayment(vnpayPayload);
+    const paymentUrl = getPaymentRedirectUrl(paymentPayload);
+
+    if (!paymentUrl) {
+      throw new Error("Backend chưa trả về payment_url để chuyển sang VNPAY.");
+    }
+
+    savePendingVnpayPayment(pendingOrder);
+    showToast(VNPAY_REDIRECT_MESSAGE, "info");
+    setMessage(VNPAY_REDIRECT_MESSAGE);
+    window.location.href = paymentUrl;
+  };
+
+  const getRetryablePendingVnpayOrder = async (pendingOrder) => {
+    const payload = await customerOrderService.getOrder(pendingOrder.orderId);
+    const order = readOrder(payload);
+
+    if (!isRetryablePendingOrder(order)) {
+      clearPendingVnpayPayment();
+      setPendingVnpayOrder(null);
+      throw new Error(VNPAY_NOT_RETRYABLE_MESSAGE);
+    }
+
+    return buildPendingVnpayOrder(order, pendingOrder.amount);
+  };
+
+  const handleRetryVnpayPayment = async () => {
+    if (!pendingVnpayOrder || checkoutInFlightRef.current) {
+      return;
+    }
+
+    checkoutInFlightRef.current = true;
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const retryOrder = await getRetryablePendingVnpayOrder(pendingVnpayOrder);
+
+      setPendingVnpayOrder(retryOrder);
+      savePendingVnpayPayment(retryOrder);
+      await redirectToVnpay(retryOrder);
+    } catch (err) {
+      const message =
+        err?.message === VNPAY_NOT_RETRYABLE_MESSAGE
+          ? VNPAY_NOT_RETRYABLE_MESSAGE
+          : VNPAY_PENDING_MESSAGE;
+
+      setMessage(message);
+      showToast(message, "warning");
+    } finally {
+      checkoutInFlightRef.current = false;
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
+
+    if (checkoutInFlightRef.current) {
+      return;
+    }
+
+    if (form.paymentMethod === "VNPAY" && pendingVnpayOrder) {
+      await handleRetryVnpayPayment();
+      return;
+    }
+
+    checkoutInFlightRef.current = true;
     setLoading(true);
     setMessage("");
 
@@ -45,7 +234,7 @@ export default function CheckoutPage() {
         quantity: item.quantity,
         subtotal: item.price * item.quantity,
       }));
-      const order = await orderService.createOrder({
+      const order = await orderApi.createOrder({
         user_id: user.id,
         receiver_name: form.fullName,
         receiver_phone: form.phone,
@@ -57,33 +246,55 @@ export default function CheckoutPage() {
         final_amount: totalAmount,
         status: "pending",
         payment_status: "pending",
+        payment_method: form.paymentMethod,
         note: form.note,
         items: orderItems,
       });
+      console.log("Created order:", order);
+
+      const pendingOrder = buildPendingVnpayOrder(order, totalAmount);
+      const orderId = pendingOrder.orderId;
+
+      if (form.paymentMethod === "VNPAY") {
+        setPendingVnpayOrder(pendingOrder);
+        savePendingVnpayPayment(pendingOrder);
+
+        try {
+          await redirectToVnpay(pendingOrder);
+        } catch {
+          setMessage(VNPAY_PENDING_MESSAGE);
+          showToast(VNPAY_PENDING_MESSAGE, "warning");
+        }
+
+        return;
+      }
 
       await paymentService.createPayment({
-        order_id: order.id,
-        payment_method: form.paymentMethod,
-        payment_provider: form.paymentMethod === "ONLINE" ? "online" : "cod",
+        order_id: orderId,
+        payment_method: "COD",
+        payment_provider: "cod",
         amount: totalAmount,
-        status: form.paymentMethod === "COD" ? "pending" : "created",
+        status: "pending",
       });
 
       await Promise.allSettled(items.map((item) => removeItem(item.id)));
       await refreshCart();
 
-      showToast("Tạo đơn hàng thành công.", "success");
-      setMessage("Đơn hàng đã được tạo và gửi sang backend BStore.");
+      showToast(ORDER_SUCCESS_MESSAGE, "success");
+      setMessage(ORDER_SUCCESS_MESSAGE);
+      navigate(`/account/orders/${encodeURIComponent(orderId)}`);
     } catch (err) {
-      const apiMessage = getApiErrorMessage(err, "Không tạo được đơn hàng.");
+      const fallbackMessage = err?.message || "Không tạo được đơn hàng.";
+      const apiMessage = getApiErrorMessage(err, fallbackMessage);
       setMessage(apiMessage);
       showToast(apiMessage, "error");
     } finally {
+      checkoutInFlightRef.current = false;
       setLoading(false);
     }
   };
 
-  if (items.length === 0) {
+  if (items.length === 0 && !pendingVnpayOrder) {
     return (
       <main className="container checkout-page">
         <section className="empty-state">
@@ -105,6 +316,11 @@ export default function CheckoutPage() {
       {message ? <StatusMessage>{message}</StatusMessage> : null}
       <div className="checkout-layout">
         <form className="checkout-form form-stack" onSubmit={handleSubmit}>
+          {pendingVnpayOrder ? (
+            <StatusMessage tone="warning">
+              {VNPAY_PENDING_MESSAGE}
+            </StatusMessage>
+          ) : null}
           <label>
             Họ tên người nhận
             <input
@@ -143,9 +359,10 @@ export default function CheckoutPage() {
             />
           </label>
           <div className="payment-options">
-            <label>
+            <label className={form.paymentMethod === "COD" ? "selected" : ""}>
               <input
                 checked={form.paymentMethod === "COD"}
+                disabled={Boolean(pendingVnpayOrder)}
                 name="paymentMethod"
                 onChange={handleChange}
                 type="radio"
@@ -153,23 +370,58 @@ export default function CheckoutPage() {
               />
               Thanh toán COD
             </label>
-            <label>
+            <label className={form.paymentMethod === "VNPAY" ? "selected" : ""}>
               <input
-                checked={form.paymentMethod === "ONLINE"}
+                checked={form.paymentMethod === "VNPAY"}
+                disabled={Boolean(pendingVnpayOrder)}
                 name="paymentMethod"
                 onChange={handleChange}
                 type="radio"
-                value="ONLINE"
+                value="VNPAY"
               />
-              Thanh toán Online
+              VNPAY
             </label>
           </div>
-          <button className="primary-button" disabled={loading} type="submit">
-            {loading ? "Đang tạo đơn..." : "Đặt hàng"}
+          {pendingVnpayOrder && form.paymentMethod === "VNPAY" ? (
+            <div className="payment-result-actions">
+              <button
+                className="primary-button"
+                disabled={loading}
+                onClick={handleRetryVnpayPayment}
+                type="button"
+              >
+                {loading ? "Đang tạo thanh toán..." : "Thanh toán lại"}
+              </button>
+              <Link
+                className="secondary-button"
+                to={`/account/orders/${encodeURIComponent(pendingVnpayOrder.orderId)}`}
+              >
+                Xem đơn hàng
+              </Link>
+            </div>
+          ) : null}
+          <button
+            className="primary-button"
+            disabled={loading || Boolean(pendingVnpayOrder)}
+            type="submit"
+          >
+            {loading
+              ? form.paymentMethod === "VNPAY"
+                ? "Đang tạo thanh toán..."
+                : "Đang tạo đơn..."
+              : "Đặt hàng"}
           </button>
         </form>
         <aside className="summary-panel">
           <h2>Đơn hàng</h2>
+          {pendingVnpayOrder && items.length === 0 ? (
+            <div>
+              <span>
+                Đơn hàng #{pendingVnpayOrder.orderCode || pendingVnpayOrder.orderId}
+              </span>
+              <strong>{formatCurrency(pendingVnpayOrder.amount)}</strong>
+            </div>
+          ) : null}
           {items.map((item) => (
             <div key={item.id}>
               <span>
@@ -180,7 +432,9 @@ export default function CheckoutPage() {
           ))}
           <div className="summary-total">
             <span>Tổng cộng</span>
-            <strong>{formatCurrency(totalAmount)}</strong>
+            <strong>
+              {formatCurrency(pendingVnpayOrder?.amount || totalAmount)}
+            </strong>
           </div>
         </aside>
       </div>

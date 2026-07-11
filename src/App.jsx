@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   BrowserRouter,
   Link,
@@ -38,6 +39,16 @@ import PolicyPage from "./pages/Policy/PolicyPage";
 import ProductDetailPage from "./pages/ProductDetail/ProductDetailPage";
 import ProductsPage from "./pages/Products/ProductsPage";
 import { USER_ROLES } from "./utils/formatters";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+      staleTime: 30_000,
+    },
+  },
+});
 
 function ForbiddenPage() {
   return (
@@ -86,12 +97,13 @@ function ApiNavigationEvents() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <ToastProvider>
-        <AuthProvider>
-          <ApiNavigationEvents />
-          <CartProvider>
-            <Routes>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ToastProvider>
+          <AuthProvider>
+            <ApiNavigationEvents />
+            <CartProvider>
+              <Routes>
               <Route element={<UserLayout />}>
                 <Route index element={<HomePage />} />
                 <Route path="products" element={<ProductsPage />} />
@@ -177,11 +189,12 @@ function App() {
                 />
               </Route>
               <Route path="*" element={<Navigate replace to="/" />} />
-            </Routes>
-          </CartProvider>
-        </AuthProvider>
-      </ToastProvider>
-    </BrowserRouter>
+              </Routes>
+            </CartProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
 

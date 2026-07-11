@@ -1,27 +1,20 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PaymentStatusBadge from "../../components/PaymentStatusBadge";
 import StatusBadge from "../../components/StatusBadge";
 import StatusMessage from "../../components/StatusMessage";
+import { useToast } from "../../context/ToastContext";
 import { readCollection } from "../../services/api";
 import { customerOrderService } from "../../services/bstoreService";
 import { getStatusErrorMessage } from "../../utils/apiErrors";
 import { formatCurrency } from "../../utils/formatters";
+import { displayWorkflowText } from "../../utils/orderWorkflow";
 import OrderDetailModal from "./OrderDetailModal";
 
+const EMPTY_ORDERS = [];
+
 function displayText(value, fallback = "") {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
-
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value);
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "Có" : "Không";
-  }
-
-  return fallback;
+  return displayWorkflowText(value, fallback);
 }
 
 function formatAddressValue(value) {
@@ -119,95 +112,113 @@ function normalizeOrder(order = {}) {
   };
 }
 
+function TableSkeleton() {
+  return (
+    <table className="admin-table account-order-table">
+      <thead>
+        <tr>
+          {Array.from({ length: 7 }).map((_, index) => (
+            <th key={`heading-${index}`}>
+              <span className="skeleton-line order-skeleton-line" />
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: 4 }).map((_, rowIndex) => (
+          <tr key={`row-${rowIndex}`}>
+            {Array.from({ length: 7 }).map((_, cellIndex) => (
+              <td key={`cell-${rowIndex}-${cellIndex}`}>
+                <span className="skeleton-line order-skeleton-line" />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export default function OrderHistory() {
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [detailState, setDetailState] = useState({
-    errorMessage: "",
-    loading: false,
     open: false,
     order: null,
+    orderId: null,
   });
-  const [errorMessage, setErrorMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [orders, setOrders] = useState([]);
 
-  useEffect(() => {
-    let ignored = false;
+  const ordersQuery = useQuery({
+    queryFn: async () => {
+      const payload = await customerOrderService.getOrders();
+      return readOrders(payload).map(normalizeOrder);
+    },
+    queryKey: ["customer", "orders"],
+  });
 
-    async function loadOrders() {
-      setLoading(true);
-      setErrorMessage("");
+  const detailQuery = useQuery({
+    enabled: detailState.open && Boolean(detailState.orderId),
+    queryFn: async () => {
+      const payload = await customerOrderService.getOrder(detailState.orderId, {
+        suppressGlobalError: true,
+      });
+      return payload.order || payload.data || payload;
+    },
+    queryKey: ["customer", "order", detailState.orderId],
+  });
 
-      try {
-        const payload = await customerOrderService.getOrders();
-        const nextOrders = readOrders(payload).map(normalizeOrder);
+  const cancelOrderMutation = useMutation({
+    mutationFn: ({ orderId, reason }) =>
+      customerOrderService.cancelOrder(orderId, {
+        cancel_reason: reason,
+        reason,
+      }),
+    onError: (error) => {
+      showToast(getStatusErrorMessage(error, "Không thể hủy đơn hàng."), "error");
+    },
+    onSuccess: async (_, variables) => {
+      showToast("Đã gửi yêu cầu hủy đơn hàng.", "success");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["customer", "orders"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer", "order", variables.orderId] }),
+      ]);
+    },
+  });
 
-        if (!ignored) {
-          setOrders(nextOrders);
-        }
-      } catch (error) {
-        if (!ignored) {
-          setErrorMessage(
-            getStatusErrorMessage(error, "Không thể tải lịch sử mua hàng."),
-          );
-        }
-      } finally {
-        if (!ignored) {
-          setLoading(false);
-        }
-      }
-    }
+  const orders = ordersQuery.data ?? EMPTY_ORDERS;
+  const errorMessage = ordersQuery.error
+    ? getStatusErrorMessage(ordersQuery.error, "Không thể tải lịch sử mua hàng.")
+    : "";
+  const detailOrder = detailQuery.data || detailState.order;
+  const detailErrorMessage = detailQuery.error && !detailState.order
+    ? getStatusErrorMessage(detailQuery.error, "Không thể tải chi tiết đơn hàng.")
+    : "";
+  const detailLoading = detailState.open && detailState.orderId
+    ? detailQuery.isLoading || detailQuery.isFetching
+    : false;
 
-    loadOrders();
-
-    return () => {
-      ignored = true;
-    };
-  }, []);
-
-  const handleOpenDetail = async (order) => {
+  const handleOpenDetail = (order) => {
     if (!order.id) {
       setDetailState({
-        errorMessage: "Không tìm thấy mã đơn hàng để tải chi tiết.",
-        loading: false,
         open: true,
         order: order.raw,
+        orderId: null,
       });
       return;
     }
 
     setDetailState({
-      errorMessage: "",
-      loading: true,
       open: true,
       order: order.raw,
+      orderId: order.id,
     });
-
-    try {
-      const payload = await customerOrderService.getOrder(order.id);
-      setDetailState({
-        errorMessage: "",
-        loading: false,
-        open: true,
-        order: payload.order || payload.data || payload,
-      });
-    } catch (error) {
-      setDetailState((current) => ({
-        ...current,
-        errorMessage: getStatusErrorMessage(
-          error,
-          "Không thể tải chi tiết đơn hàng.",
-        ),
-        loading: false,
-      }));
-    }
   };
 
   const handleCloseDetail = () => {
     setDetailState({
-      errorMessage: "",
-      loading: false,
       open: false,
       order: null,
+      orderId: null,
     });
   };
 
@@ -222,16 +233,20 @@ export default function OrderHistory() {
 
       <StatusMessage tone="error">{errorMessage}</StatusMessage>
 
-      {loading ? <p className="muted-text">Đang tải lịch sử mua hàng...</p> : null}
+      {ordersQuery.isLoading ? (
+        <div className="admin-table-wrap account-table-wrap">
+          <TableSkeleton />
+        </div>
+      ) : null}
 
-      {!loading && orders.length === 0 ? (
+      {!ordersQuery.isLoading && orders.length === 0 ? (
         <div className="empty-state">
           <h2>Chưa có đơn hàng</h2>
           <p>Các đơn hàng đã đặt sẽ xuất hiện tại đây.</p>
         </div>
       ) : null}
 
-      {!loading && orders.length > 0 ? (
+      {!ordersQuery.isLoading && orders.length > 0 ? (
         <div className="admin-table-wrap account-table-wrap">
           <table className="admin-table account-order-table">
             <thead>
@@ -272,15 +287,27 @@ export default function OrderHistory() {
               ))}
             </tbody>
           </table>
+          {ordersQuery.isFetching ? (
+            <p className="muted-text order-inline-refresh">
+              Đang cập nhật dữ liệu...
+            </p>
+          ) : null}
         </div>
       ) : null}
 
       {detailState.open ? (
         <OrderDetailModal
-          errorMessage={detailState.errorMessage}
-          loading={detailState.loading}
+          actionPending={cancelOrderMutation.isPending}
+          errorMessage={detailErrorMessage}
+          loading={detailLoading}
+          onCancelOrder={(reason) =>
+            cancelOrderMutation.mutateAsync({
+              orderId: detailState.orderId,
+              reason,
+            })
+          }
           onClose={handleCloseDetail}
-          order={detailState.order}
+          order={detailOrder}
         />
       ) : null}
     </section>

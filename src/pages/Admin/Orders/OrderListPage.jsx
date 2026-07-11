@@ -1,52 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PaymentStatusBadge from "../../../components/PaymentStatusBadge";
 import StatusBadge from "../../../components/StatusBadge";
 import StatusMessage from "../../../components/StatusMessage";
+import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 import { readCollection } from "../../../services/api";
 import { adminService } from "../../../services/bstoreService";
 import { getStatusErrorMessage } from "../../../utils/apiErrors";
 import { formatCurrency } from "../../../utils/formatters";
+import {
+  buildOrderTimeline,
+  canCancelOrder,
+  displayWorkflowText,
+  formatWorkflowDateTime,
+  getComplaintContact,
+  getOrderStatusLabel,
+  getProcessingHistory,
+  getRefundInfo,
+  getStaffInfo,
+  getStaffInitials,
+  normalizeWorkflowKey,
+  ORDER_STATUS_OPTIONS,
+} from "../../../utils/orderWorkflow";
 
-const ORDER_STATUS_OPTIONS = [
-  { label: "Chờ xử lý", value: "pending" },
-  { label: "Đã xác nhận", value: "confirmed" },
-  { label: "Đang xử lý", value: "processing" },
-  { label: "Đang giao hàng", value: "shipping" },
-  { label: "Đã giao hàng", value: "delivered" },
-  { label: "Hoàn tất", value: "completed" },
-  { label: "Đã hủy", value: "cancelled" },
-  { label: "Đã hoàn tiền", value: "refunded" },
-  { label: "Đã trả hàng", value: "returned" },
-];
+const EMPTY_ORDERS = [];
 
 function displayText(value, fallback = "") {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
-
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value);
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "Có" : "Không";
-  }
-
-  if (typeof value === "object") {
-    return (
-      value.name ||
-      value.full_name ||
-      value.fullName ||
-      value.label ||
-      value.title ||
-      value.method ||
-      value.code ||
-      fallback
-    );
-  }
-
-  return fallback;
+  return displayWorkflowText(value, fallback);
 }
 
 function toNumber(...values) {
@@ -68,13 +49,6 @@ function toNumber(...values) {
       if (Number.isFinite(decimalNumber)) {
         return decimalNumber;
       }
-
-      const digitText = value.replace(/[^\d-]/g, "");
-      const digitNumber = Number(digitText);
-
-      if (Number.isFinite(digitNumber)) {
-        return digitNumber;
-      }
     }
   }
 
@@ -82,23 +56,7 @@ function toNumber(...values) {
 }
 
 function formatDateTime(value) {
-  if (!value) {
-    return "Chưa cập nhật";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
-
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatWorkflowDateTime(value);
 }
 
 function formatAddressValue(value) {
@@ -213,44 +171,41 @@ function getShippingAddress(order = {}) {
 
 function getCustomerInfo(order = {}) {
   const customer = getCustomer(order);
-  const name = displayText(
-    order.customer_name ||
-      order.customerName ||
-      order.receiver_name ||
-      order.receiverName ||
-      order.shipping_name ||
-      order.shippingName ||
-      customer.full_name ||
-      customer.fullName ||
-      customer.name,
-    "Khách hàng",
-  );
-  const email = displayText(
-    order.customer_email ||
-      order.customerEmail ||
-      order.receiver_email ||
-      order.receiverEmail ||
-      order.email ||
-      customer.email,
-    "",
-  );
-  const phone = displayText(
-    order.customer_phone ||
-      order.customerPhone ||
-      order.receiver_phone ||
-      order.receiverPhone ||
-      order.shipping_phone ||
-      order.shippingPhone ||
-      order.phone ||
-      customer.phone,
-    "",
-  );
 
   return {
     address: formatAddressValue(getShippingAddress(order)),
-    email,
-    name,
-    phone,
+    email: displayText(
+      order.customer_email ||
+        order.customerEmail ||
+        order.receiver_email ||
+        order.receiverEmail ||
+        order.email ||
+        customer.email,
+      "",
+    ),
+    name: displayText(
+      order.customer_name ||
+        order.customerName ||
+        order.receiver_name ||
+        order.receiverName ||
+        order.shipping_name ||
+        order.shippingName ||
+        customer.full_name ||
+        customer.fullName ||
+        customer.name,
+      "Khách hàng",
+    ),
+    phone: displayText(
+      order.customer_phone ||
+        order.customerPhone ||
+        order.receiver_phone ||
+        order.receiverPhone ||
+        order.shipping_phone ||
+        order.shippingPhone ||
+        order.phone ||
+        customer.phone,
+      "",
+    ),
   };
 }
 
@@ -295,27 +250,6 @@ function getOrderItems(order = {}) {
       return container;
     }
 
-    const items = readCollection(container, [
-      "order_items",
-      "orderItems",
-      "items",
-      "details",
-      "products",
-    ]);
-
-    if (items.length) {
-      return items;
-    }
-  }
-
-  const nestedContainers = [
-    order.data,
-    order.data?.order_items,
-    order.data?.orderItems,
-    order.data?.items,
-  ];
-
-  for (const container of nestedContainers) {
     const items = readCollection(container, [
       "order_items",
       "orderItems",
@@ -430,6 +364,10 @@ function normalizeOrder(order = {}) {
   const items = getOrderItems(order).map(normalizeOrderItem);
   const totals = normalizeOrderTotals(order, items);
   const status = displayText(order.status || order.order_status || order.orderStatus, "pending");
+  const statusLabel = displayText(
+    order.status_label || order.statusLabel,
+    getOrderStatusLabel(status),
+  );
   const paymentStatus = displayText(
     order.payment_status ||
       order.paymentStatus ||
@@ -437,6 +375,7 @@ function normalizeOrder(order = {}) {
       order.payment,
     "pending",
   );
+  const staff = getStaffInfo(order);
 
   return {
     contact: customer.email || customer.phone || "Chưa cập nhật",
@@ -472,14 +411,15 @@ function normalizeOrder(order = {}) {
         order.deliveryMethod,
       "Chưa cập nhật",
     ),
+    staff,
     status,
-    statusLabel: displayText(order.status_label || order.statusLabel, ""),
+    statusLabel,
     totals,
   };
 }
 
 function getStatusOptions(currentStatus, currentLabel = "") {
-  const normalizedCurrentStatus = String(currentStatus || "").toLowerCase();
+  const normalizedCurrentStatus = normalizeWorkflowKey(currentStatus);
   const hasCurrentStatus = ORDER_STATUS_OPTIONS.some(
     (option) => option.value === normalizedCurrentStatus,
   );
@@ -503,7 +443,7 @@ function OrderStatusControl({
   onChange,
   status,
 }) {
-  const normalizedStatus = String(status || "").toLowerCase();
+  const normalizedStatus = normalizeWorkflowKey(status);
 
   return (
     <div className="order-status-control">
@@ -523,20 +463,289 @@ function OrderStatusControl({
   );
 }
 
+function StaffSummary({ action, staff }) {
+  if (!staff?.hasStaff) {
+    return (
+      <div className="order-staff-summary order-staff-summary--empty">
+        <strong>Chưa có người xử lý</strong>
+        {action}
+      </div>
+    );
+  }
+
+  return (
+    <div className="order-staff-summary">
+      <span className="order-staff-avatar">
+        {staff.avatar ? (
+          <img alt={staff.name || "Staff"} src={staff.avatar} />
+        ) : (
+          getStaffInitials(staff)
+        )}
+      </span>
+      <div>
+        <strong>{staff.name || "Nhân viên phụ trách"}</strong>
+        <span>{staff.phone || "Chưa cập nhật SĐT"}</span>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function WorkflowTimeline({ items, variant = "order" }) {
+  return (
+    <ol className={`workflow-timeline workflow-timeline--${variant}`}>
+      {items.map((item, index) => (
+        <li
+          className={`workflow-timeline-item workflow-timeline-item--${item.tone || "pending"}`}
+          key={`${item.key || item.label}-${index}`}
+        >
+          <div className="workflow-timeline-node" aria-hidden="true">
+            <span>●</span>
+            {index < items.length - 1 ? <i>↓</i> : null}
+          </div>
+          <div className="workflow-timeline-body">
+            <strong>{item.label || item.action}</strong>
+            <dl>
+              <div>
+                <dt>Thời gian</dt>
+                <dd>{formatDateTime(item.time)}</dd>
+              </div>
+              <div>
+                <dt>Nhân viên</dt>
+                <dd>{item.staff?.hasStaff ? item.staff.name : "Chưa cập nhật"}</dd>
+              </div>
+              <div>
+                <dt>Ghi chú</dt>
+                <dd>{item.note || "Chưa có ghi chú"}</dd>
+              </div>
+            </dl>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ProcessingHistoryTimeline({ items }) {
+  if (!items.length) {
+    return <p className="muted-text">Chưa có lịch sử xử lý.</p>;
+  }
+
+  return (
+    <ol className="processing-history-timeline">
+      {items.map((item, index) => (
+        <li key={item.id || `${item.action}-${index}`}>
+          <time>{formatDateTime(item.time)}</time>
+          <strong>{item.staff?.hasStaff ? item.staff.name : "Chưa cập nhật"}</strong>
+          <span>{item.action}</span>
+          {item.note ? <p>{item.note}</p> : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function TableSkeleton({ columns = 10, rows = 5 }) {
+  return (
+    <table className="admin-table admin-order-table admin-orders-table">
+      <thead>
+        <tr>
+          {Array.from({ length: columns }).map((_, index) => (
+            <th key={`heading-${index}`}>
+              <span className="skeleton-line order-skeleton-line" />
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: rows }).map((_, rowIndex) => (
+          <tr key={`row-${rowIndex}`}>
+            {Array.from({ length: columns }).map((_, cellIndex) => (
+              <td key={`cell-${rowIndex}-${cellIndex}`}>
+                <span className="skeleton-line order-skeleton-line" />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="order-detail-skeleton">
+      <span className="skeleton-line skeleton-line--title" />
+      <span className="skeleton-line" />
+      <span className="skeleton-line" />
+      <span className="skeleton-line skeleton-line--short" />
+    </div>
+  );
+}
+
+function ConfirmDialog({
+  confirmLabel = "Xác nhận",
+  description,
+  onCancel,
+  onConfirm,
+  pending,
+  title,
+  tone = "primary",
+}) {
+  return (
+    <div className="modal-backdrop order-confirm-backdrop" role="presentation">
+      <section aria-modal="true" className="order-confirm-modal" role="dialog">
+        <h2>{title}</h2>
+        <p>{description}</p>
+        <div className="modal-actions">
+          <button disabled={pending} onClick={onCancel} type="button">
+            Đóng
+          </button>
+          <button
+            className={tone === "danger" ? "danger-button" : "primary-button"}
+            disabled={pending}
+            onClick={onConfirm}
+            type="button"
+          >
+            {pending ? "Đang xử lý..." : confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CancelOrderDialog({ onClose, onConfirm, pending }) {
+  const [reason, setReason] = useState("");
+
+  return (
+    <div className="modal-backdrop order-confirm-backdrop" role="presentation">
+      <section aria-modal="true" className="order-confirm-modal" role="dialog">
+        <h2>Hủy đơn hàng</h2>
+        <label className="order-cancel-reason">
+          <span>Lý do</span>
+          <textarea
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Nhập lý do hủy đơn..."
+            rows={5}
+            value={reason}
+          />
+        </label>
+        <div className="modal-actions">
+          <button disabled={pending} onClick={onClose} type="button">
+            Đóng
+          </button>
+          <button
+            className="danger-button"
+            disabled={pending || !reason.trim()}
+            onClick={() => onConfirm(reason.trim())}
+            type="button"
+          >
+            {pending ? "Đang hủy..." : "Xác nhận"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ComplaintPanel({ contact }) {
+  return (
+    <div className="order-contact-panel">
+      <StaffSummary staff={contact} />
+      <dl>
+        <div>
+          <dt>Tên nhân viên phụ trách</dt>
+          <dd>{contact.name}</dd>
+        </div>
+        <div>
+          <dt>Số điện thoại</dt>
+          <dd>{contact.phone}</dd>
+        </div>
+      </dl>
+      <div className="order-contact-actions">
+        <a className="primary-button" href={`tel:${contact.phone}`}>
+          Gọi ngay
+        </a>
+        <a className="secondary-button" href={`sms:${contact.phone}`}>
+          Nhắn tin
+        </a>
+      </div>
+      {contact.source === "admin" ? (
+        <p className="muted-text">Đơn hàng chưa có staff nên hệ thống hiển thị thông tin Admin.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function RefundPanel({ disabled, onRefundStatusChange, orderId, refundInfo }) {
+  const status = normalizeWorkflowKey(refundInfo.status);
+
+  return (
+    <div className="order-refund-panel">
+      <WorkflowTimeline items={refundInfo.timeline} variant="refund" />
+      <div className="order-refund-actions">
+        <button
+          disabled={disabled || ["approved", "refunding", "refunded"].includes(status)}
+          onClick={() => onRefundStatusChange(orderId, "approved")}
+          type="button"
+        >
+          Duyệt hoàn tiền
+        </button>
+        <button
+          disabled={disabled || ["refunding", "refunded"].includes(status)}
+          onClick={() => onRefundStatusChange(orderId, "refunding")}
+          type="button"
+        >
+          Đang hoàn tiền
+        </button>
+        <button
+          disabled={disabled || status === "refunded"}
+          onClick={() => onRefundStatusChange(orderId, "refunded")}
+          type="button"
+        >
+          Hoàn tất
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OrderDetailModal({
+  actionPending,
   errorMessage,
   loading,
+  onAssign,
+  onCancelOrder,
   onClose,
+  onRefundStatusChange,
   onStatusChange,
   order,
   updating,
 }) {
+  const [activeTab, setActiveTab] = useState("timeline");
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
   const normalizedOrder = useMemo(
     () => normalizeOrder(order || {}),
     [order],
   );
   const orderTitle = normalizedOrder.orderCode || normalizedOrder.id;
   const totals = normalizedOrder.totals;
+  const timeline = useMemo(() => buildOrderTimeline(order || {}), [order]);
+  const refundInfo = useMemo(() => getRefundInfo(order || {}), [order]);
+  const history = useMemo(() => getProcessingHistory(order || {}), [order]);
+  const complaintContact = useMemo(() => getComplaintContact(order || {}), [order]);
+  const cancelable = canCancelOrder(normalizedOrder.status);
+  const shippingLocked = ["shipping", "shipped", "delivering", "delivered", "completed"].includes(
+    normalizeWorkflowKey(normalizedOrder.status),
+  );
+  const tabs = [
+    { key: "timeline", label: "Timeline" },
+    { key: "complaints", label: "Khiếu nại" },
+    { key: "refund", label: "Refund" },
+    { key: "history", label: "Lịch sử xử lý" },
+    { key: "items", label: "Sản phẩm" },
+  ];
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -547,16 +756,16 @@ function OrderDetailModal({
             <h2>{orderTitle ? `#${orderTitle}` : "Đơn hàng"}</h2>
           </div>
           <button aria-label="Đóng" onClick={onClose} type="button">
-            x
+            ×
           </button>
         </div>
 
-        {loading ? <p className="muted-text">Đang tải chi tiết đơn hàng...</p> : null}
+        {loading ? <DetailSkeleton /> : null}
         <StatusMessage tone="error">{errorMessage}</StatusMessage>
 
         {!loading && order ? (
           <div className="order-detail-content admin-order-detail-content">
-            <div className="admin-order-detail-grid">
+            <div className="admin-order-detail-grid admin-order-detail-grid--wide">
               <article>
                 <h3>Thông tin đơn hàng</h3>
                 <dl>
@@ -577,20 +786,6 @@ function OrderDetailModal({
                     <dd>{normalizedOrder.shippingMethod}</dd>
                   </div>
                 </dl>
-                <div className="admin-order-status-stack">
-                  <OrderStatusControl
-                    currentLabel={normalizedOrder.statusLabel}
-                    disabled={updating}
-                    onChange={(nextStatus) =>
-                      onStatusChange(normalizedOrder.id, nextStatus)
-                    }
-                    status={normalizedOrder.status}
-                  />
-                  <PaymentStatusBadge
-                    label={normalizedOrder.paymentStatusLabel}
-                    value={normalizedOrder.paymentStatus}
-                  />
-                </div>
               </article>
 
               <article>
@@ -614,148 +809,279 @@ function OrderDetailModal({
                   </div>
                 </dl>
               </article>
+
+              <article className="order-staff-card">
+                <h3>Staff phụ trách</h3>
+                {normalizedOrder.staff.hasStaff ? (
+                  <dl>
+                    <div>
+                      <dt>Tên</dt>
+                      <dd>{normalizedOrder.staff.name}</dd>
+                    </div>
+                    <div>
+                      <dt>SĐT</dt>
+                      <dd>{normalizedOrder.staff.phone || "Chưa cập nhật"}</dd>
+                    </div>
+                    <div>
+                      <dt>Email</dt>
+                      <dd>{normalizedOrder.staff.email || "Chưa cập nhật"}</dd>
+                    </div>
+                    <div>
+                      <dt>Ngày nhận xử lý</dt>
+                      <dd>{formatDateTime(normalizedOrder.staff.assignedAt)}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <div className="order-staff-waiting">
+                    Đang chờ nhân viên tiếp nhận.
+                    <button disabled={actionPending} onClick={() => onAssign(normalizedOrder.id)} type="button">
+                      Nhận xử lý
+                    </button>
+                  </div>
+                )}
+              </article>
             </div>
 
-            <div className="admin-table-wrap order-detail-table-wrap">
-              <table className="admin-table order-detail-table">
-                <thead>
-                  <tr>
-                    <th>Sản phẩm</th>
-                    <th>Phân loại</th>
-                    <th>Số lượng</th>
-                    <th>Đơn giá</th>
-                    <th>Thành tiền</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {normalizedOrder.items.map((item, index) => (
-                    <tr key={`${item.id}-${index}`}>
-                      <td>{item.productName}</td>
-                      <td>{item.variantText || "-"}</td>
-                      <td>{item.quantity}</td>
-                      <td>{formatCurrency(item.price)}</td>
-                      <td>{formatCurrency(item.subtotal)}</td>
-                    </tr>
-                  ))}
-                  {normalizedOrder.items.length === 0 ? (
-                    <tr>
-                      <td colSpan="5">Không có sản phẩm trong đơn hàng.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+            <div className="admin-order-status-stack admin-order-status-stack--actions">
+              <OrderStatusControl
+                currentLabel={normalizedOrder.statusLabel}
+                disabled={updating}
+                onChange={(nextStatus) =>
+                  onStatusChange(normalizedOrder.id, nextStatus, normalizedOrder.statusLabel)
+                }
+                status={normalizedOrder.status}
+              />
+              <PaymentStatusBadge
+                label={normalizedOrder.paymentStatusLabel}
+                value={normalizedOrder.paymentStatus}
+              />
+              {cancelable ? (
+                <button
+                  className="danger-button"
+                  disabled={actionPending}
+                  onClick={() => setShowCancelDialog(true)}
+                  type="button"
+                >
+                  Hủy đơn
+                </button>
+              ) : null}
+              {shippingLocked ? (
+                <p className="order-cancel-locked">
+                  Đơn hàng đã chuyển sang giai đoạn vận chuyển nên không thể hủy.
+                </p>
+              ) : null}
             </div>
 
-            <dl className="order-total-list">
-              <div>
-                <dt>Tổng tiền</dt>
-                <dd>{formatCurrency(totals.total)}</dd>
-              </div>
-              <div>
-                <dt>Giảm giá</dt>
-                <dd>{formatCurrency(totals.discount)}</dd>
-              </div>
-              <div>
-                <dt>Phí ship</dt>
-                <dd>{formatCurrency(totals.shippingFee)}</dd>
-              </div>
-              <div className="order-total-list-final">
-                <dt>Thành tiền</dt>
-                <dd>{formatCurrency(totals.finalAmount)}</dd>
-              </div>
-            </dl>
+            <div className="order-detail-tabs" role="tablist">
+              {tabs.map((tab) => (
+                <button
+                  className={activeTab === tab.key ? "active" : ""}
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  type="button"
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {activeTab === "timeline" ? (
+              <WorkflowTimeline items={timeline} />
+            ) : null}
+
+            {activeTab === "complaints" ? (
+              <ComplaintPanel contact={complaintContact} />
+            ) : null}
+
+            {activeTab === "refund" ? (
+              <RefundPanel
+                disabled={actionPending}
+                onRefundStatusChange={onRefundStatusChange}
+                orderId={normalizedOrder.id}
+                refundInfo={refundInfo}
+              />
+            ) : null}
+
+            {activeTab === "history" ? (
+              <ProcessingHistoryTimeline items={history} />
+            ) : null}
+
+            {activeTab === "items" ? (
+              <>
+                <div className="admin-table-wrap order-detail-table-wrap">
+                  <table className="admin-table order-detail-table">
+                    <thead>
+                      <tr>
+                        <th>Sản phẩm</th>
+                        <th>Phân loại</th>
+                        <th>Số lượng</th>
+                        <th>Đơn giá</th>
+                        <th>Thành tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {normalizedOrder.items.map((item, index) => (
+                        <tr key={`${item.id}-${index}`}>
+                          <td>{item.productName}</td>
+                          <td>{item.variantText || "-"}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.price)}</td>
+                          <td>{formatCurrency(item.subtotal)}</td>
+                        </tr>
+                      ))}
+                      {normalizedOrder.items.length === 0 ? (
+                        <tr>
+                          <td colSpan="5">Không có sản phẩm trong đơn hàng.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+
+                <dl className="order-total-list">
+                  <div>
+                    <dt>Tổng tiền</dt>
+                    <dd>{formatCurrency(totals.total)}</dd>
+                  </div>
+                  <div>
+                    <dt>Giảm giá</dt>
+                    <dd>{formatCurrency(totals.discount)}</dd>
+                  </div>
+                  <div>
+                    <dt>Phí ship</dt>
+                    <dd>{formatCurrency(totals.shippingFee)}</dd>
+                  </div>
+                  <div className="order-total-list-final">
+                    <dt>Thành tiền</dt>
+                    <dd>{formatCurrency(totals.finalAmount)}</dd>
+                  </div>
+                </dl>
+              </>
+            ) : null}
           </div>
         ) : null}
       </section>
+
+      {showCancelDialog ? (
+        <CancelOrderDialog
+          onClose={() => setShowCancelDialog(false)}
+          onConfirm={async (reason) => {
+            await onCancelOrder(normalizedOrder.id, reason);
+            setShowCancelDialog(false);
+          }}
+          pending={actionPending}
+        />
+      ) : null}
     </div>
   );
 }
 
 export default function OrderListPage() {
+  const { user } = useAuth();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
+  const [confirmAction, setConfirmAction] = useState(null);
   const [detailState, setDetailState] = useState({
-    errorMessage: "",
-    loading: false,
     open: false,
     order: null,
     orderId: null,
   });
-  const [errorMessage, setErrorMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [orders, setOrders] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
-  const loadOrders = useCallback(async () => {
-    setLoading(true);
-    setErrorMessage("");
+  const invalidateOrderQueries = async (orderId) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin", "orders"] }),
+      orderId
+        ? queryClient.invalidateQueries({ queryKey: ["admin", "order", orderId] })
+        : Promise.resolve(),
+    ]);
+  };
 
-    try {
+  const ordersQuery = useQuery({
+    queryFn: async () => {
       const payload = await adminService.getOrders();
-      setOrders(readOrders(payload).map(normalizeOrder));
-    } catch (error) {
-      const message = getStatusErrorMessage(
-        error,
-        "Không thể tải danh sách đơn hàng.",
-      );
-      setErrorMessage(message);
-      showToast(message, "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+      return readOrders(payload).map(normalizeOrder);
+    },
+    queryKey: ["admin", "orders"],
+  });
 
-  const refreshOrderDetail = useCallback(async (orderId) => {
-    setDetailState((current) => ({
-      ...current,
-      errorMessage: "",
-      loading: true,
-    }));
-
-    try {
-      const payload = await adminService.getOrder(orderId);
-      const detail = readOrderDetail(payload);
-
-      setDetailState((current) => {
-        if (String(current.orderId) !== String(orderId)) {
-          return current;
-        }
-
-        return {
-          ...current,
-          errorMessage: "",
-          loading: false,
-          order: detail,
-        };
+  const detailQuery = useQuery({
+    enabled: detailState.open && Boolean(detailState.orderId),
+    queryFn: async () => {
+      const payload = await adminService.getOrder(detailState.orderId, {
+        suppressGlobalError: true,
       });
+      return readOrderDetail(payload);
+    },
+    queryKey: ["admin", "order", detailState.orderId],
+  });
 
-      return detail;
-    } catch (error) {
-      const message = getStatusErrorMessage(
-        error,
-        "Không thể tải chi tiết đơn hàng.",
-      );
+  const assignOrderMutation = useMutation({
+    mutationFn: ({ orderId }) =>
+      adminService.assignOrder(orderId, {
+        staff_id: user?.id,
+        staff_name: user?.full_name || user?.fullName || user?.name || user?.email,
+      }),
+    onError: (error) => {
+      showToast(getStatusErrorMessage(error, "Không thể nhận xử lý đơn hàng."), "error");
+    },
+    onSuccess: async (_, variables) => {
+      showToast("Đã nhận xử lý đơn hàng.", "success");
+      await invalidateOrderQueries(variables.orderId);
+    },
+  });
 
-      setDetailState((current) => {
-        if (String(current.orderId) !== String(orderId)) {
-          return current;
-        }
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ orderId, status }) =>
+      adminService.updateOrderStatus(orderId, { status }),
+    onError: (error) => {
+      showToast(getStatusErrorMessage(error, "Không thể cập nhật trạng thái đơn hàng."), "error");
+    },
+    onSuccess: async (_, variables) => {
+      showToast("Đã cập nhật trạng thái đơn hàng.", "success");
+      await invalidateOrderQueries(variables.orderId);
+    },
+  });
 
-        return {
-          ...current,
-          errorMessage: message,
-          loading: false,
-        };
-      });
-      showToast(message, "error");
-      return null;
-    }
-  }, [showToast]);
+  const cancelOrderMutation = useMutation({
+    mutationFn: ({ orderId, reason }) =>
+      adminService.cancelOrder(orderId, {
+        cancel_reason: reason,
+        reason,
+      }),
+    onError: (error) => {
+      showToast(getStatusErrorMessage(error, "Không thể hủy đơn hàng."), "error");
+    },
+    onSuccess: async (_, variables) => {
+      showToast("Đã hủy đơn hàng.", "success");
+      await invalidateOrderQueries(variables.orderId);
+    },
+  });
 
-  useEffect(() => {
-    const timerId = window.setTimeout(loadOrders, 0);
-    return () => window.clearTimeout(timerId);
-  }, [loadOrders]);
+  const refundStatusMutation = useMutation({
+    mutationFn: ({ orderId, status }) =>
+      adminService.updateRefundStatus(orderId, {
+        refund_status: status,
+        status,
+      }),
+    onError: (error) => {
+      showToast(getStatusErrorMessage(error, "Không thể cập nhật hoàn tiền."), "error");
+    },
+    onSuccess: async (_, variables) => {
+      showToast("Đã cập nhật trạng thái hoàn tiền.", "success");
+      await invalidateOrderQueries(variables.orderId);
+    },
+  });
+
+  const orders = ordersQuery.data ?? EMPTY_ORDERS;
+  const errorMessage = ordersQuery.error
+    ? getStatusErrorMessage(ordersQuery.error, "Không thể tải danh sách đơn hàng.")
+    : "";
+  const actionPending =
+    assignOrderMutation.isPending ||
+    updateStatusMutation.isPending ||
+    cancelOrderMutation.isPending ||
+    refundStatusMutation.isPending;
 
   const filteredOrders = useMemo(
     () =>
@@ -766,6 +1092,8 @@ export default function OrderListPage() {
           order.id,
           order.customerName,
           order.contact,
+          order.staff.name,
+          order.staff.phone,
           order.status,
           order.statusLabel,
           order.paymentStatus,
@@ -779,12 +1107,12 @@ export default function OrderListPage() {
   const metrics = useMemo(() => {
     const paidOrders = orders.filter((order) =>
       ["paid", "success", "completed"].includes(
-        String(order.paymentStatus || "").toLowerCase(),
+        normalizeWorkflowKey(order.paymentStatus),
       ),
     ).length;
     const pendingOrders = orders.filter((order) =>
       ["pending", "confirmed", "processing"].includes(
-        String(order.status || "").toLowerCase(),
+        normalizeWorkflowKey(order.status),
       ),
     ).length;
     const revenue = orders.reduce(
@@ -800,64 +1128,82 @@ export default function OrderListPage() {
     };
   }, [orders]);
 
+  const selectedOrder =
+    detailQuery.data ||
+    detailState.order ||
+    null;
+  const detailLoading = detailState.open && detailState.orderId
+    ? detailQuery.isLoading || detailQuery.isFetching
+    : false;
+  const detailErrorMessage = detailQuery.error && !detailState.order
+    ? getStatusErrorMessage(detailQuery.error, "Không thể tải chi tiết đơn hàng.")
+    : "";
+
   const handleOpenDetail = (order) => {
     setDetailState({
-      errorMessage: "",
-      loading: Boolean(order.id),
       open: true,
       order: order.raw,
       orderId: order.id,
     });
-
-    if (order.id) {
-      refreshOrderDetail(order.id);
-    }
   };
 
   const handleCloseDetail = () => {
     setDetailState({
-      errorMessage: "",
-      loading: false,
       open: false,
       order: null,
       orderId: null,
     });
   };
 
-  const handleUpdateOrderStatus = async (orderId, status) => {
+  const requestAssignOrder = (orderId) => {
+    if (!orderId) {
+      return;
+    }
+
+    setConfirmAction({
+      confirmLabel: "Nhận xử lý",
+      description: "Bạn chắc chắn muốn nhận xử lý đơn hàng này?",
+      onConfirm: () => assignOrderMutation.mutateAsync({ orderId }),
+      title: "Xác nhận nhận xử lý",
+    });
+  };
+
+  const requestStatusChange = (orderId, status, currentLabel = "") => {
     if (!orderId || !status) {
       return;
     }
 
-    const currentOrder = orders.find(
-      (order) => String(order.id) === String(orderId),
-    );
+    setConfirmAction({
+      confirmLabel: "Cập nhật",
+      description: `Chuyển trạng thái từ "${currentLabel || "hiện tại"}" sang "${getOrderStatusLabel(status)}"?`,
+      onConfirm: () => updateStatusMutation.mutateAsync({ orderId, status }),
+      title: "Xác nhận cập nhật trạng thái",
+    });
+  };
 
-    if (currentOrder && String(currentOrder.status).toLowerCase() === status) {
+  const requestRefundStatusChange = (orderId, status) => {
+    if (!orderId || !status) {
       return;
     }
 
-    setUpdatingOrderId(orderId);
+    setConfirmAction({
+      confirmLabel: "Xác nhận",
+      description: `Cập nhật trạng thái hoàn tiền sang "${getOrderStatusLabel(status)}"?`,
+      onConfirm: () => refundStatusMutation.mutateAsync({ orderId, status }),
+      title: "Xác nhận duyệt hoàn tiền",
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmAction?.onConfirm) {
+      return;
+    }
 
     try {
-      await adminService.updateOrderStatus(orderId, { status });
-      showToast("Đã cập nhật trạng thái đơn hàng.", "success");
-      await loadOrders();
-
-      if (
-        detailState.open &&
-        String(detailState.orderId) === String(orderId)
-      ) {
-        await refreshOrderDetail(orderId);
-      }
-    } catch (error) {
-      const message = getStatusErrorMessage(
-        error,
-        "Không thể cập nhật trạng thái đơn hàng.",
-      );
-      showToast(message, "error");
-    } finally {
-      setUpdatingOrderId(null);
+      await confirmAction.onConfirm();
+      setConfirmAction(null);
+    } catch {
+      setConfirmAction(null);
     }
   };
 
@@ -909,72 +1255,97 @@ export default function OrderListPage() {
             <span>Tìm kiếm</span>
             <input
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Mã đơn, khách hàng, email, SĐT..."
+              placeholder="Mã đơn, khách hàng, email, SĐT, staff..."
               type="search"
               value={searchTerm}
             />
           </label>
-          <button disabled={loading} onClick={loadOrders} type="button">
-            {loading ? "Đang tải..." : "Tải lại"}
+          <button disabled={ordersQuery.isFetching} onClick={() => ordersQuery.refetch()} type="button">
+            {ordersQuery.isFetching ? "Đang tải..." : "Tải lại"}
           </button>
         </div>
 
-        {loading ? <p className="muted-text">Đang tải danh sách đơn hàng...</p> : null}
+        {ordersQuery.isLoading ? <TableSkeleton /> : null}
 
-        {!loading && filteredOrders.length === 0 ? (
+        {!ordersQuery.isLoading && filteredOrders.length === 0 ? (
           <div className="admin-empty-state">
             <h2>Chưa có đơn hàng</h2>
             <p>Dữ liệu đơn hàng từ backend sẽ hiển thị tại đây.</p>
           </div>
         ) : null}
 
-        {!loading && filteredOrders.length > 0 ? (
+        {!ordersQuery.isLoading && filteredOrders.length > 0 ? (
           <table className="admin-table admin-order-table admin-orders-table">
             <thead>
               <tr>
                 <th>Mã đơn</th>
                 <th>Khách hàng</th>
                 <th>Email/SĐT</th>
+                <th>Staff phụ trách</th>
+                <th>Thời gian nhận xử lý</th>
                 <th>Ngày đặt</th>
                 <th>Tổng tiền</th>
-                <th>Trạng thái đơn hàng</th>
-                <th>Trạng thái thanh toán</th>
+                <th>Trạng thái hiện tại</th>
+                <th>Thanh toán</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.map((order) => (
-                <tr key={order.id || order.orderCode}>
-                  <td className="admin-link">#{order.orderCode || order.id}</td>
-                  <td>
-                    <strong>{order.customerName}</strong>
-                  </td>
-                  <td>{order.contact}</td>
-                  <td>{formatDateTime(order.createdAt)}</td>
-                  <td>{formatCurrency(order.totals.finalAmount)}</td>
-                  <td>
-                    <OrderStatusControl
-                      currentLabel={order.statusLabel}
-                      disabled={updatingOrderId === order.id}
-                      onChange={(status) =>
-                        handleUpdateOrderStatus(order.id, status)
-                      }
-                      status={order.status}
-                    />
-                  </td>
-                  <td>
-                    <PaymentStatusBadge
-                      label={order.paymentStatusLabel}
-                      value={order.paymentStatus}
-                    />
-                  </td>
-                  <td>
-                    <button onClick={() => handleOpenDetail(order)} type="button">
-                      Xem chi tiết
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredOrders.map((order) => {
+                const isOrderUpdating =
+                  (assignOrderMutation.isPending && assignOrderMutation.variables?.orderId === order.id) ||
+                  (updateStatusMutation.isPending && updateStatusMutation.variables?.orderId === order.id);
+
+                return (
+                  <tr key={order.id || order.orderCode}>
+                    <td className="admin-link">#{order.orderCode || order.id}</td>
+                    <td>
+                      <strong>{order.customerName}</strong>
+                    </td>
+                    <td>{order.contact}</td>
+                    <td>
+                      <StaffSummary
+                        action={
+                          !order.staff.hasStaff ? (
+                            <button
+                              disabled={actionPending}
+                              onClick={() => requestAssignOrder(order.id)}
+                              type="button"
+                            >
+                              Nhận xử lý
+                            </button>
+                          ) : null
+                        }
+                        staff={order.staff}
+                      />
+                    </td>
+                    <td>{formatDateTime(order.staff.assignedAt)}</td>
+                    <td>{formatDateTime(order.createdAt)}</td>
+                    <td>{formatCurrency(order.totals.finalAmount)}</td>
+                    <td>
+                      <OrderStatusControl
+                        currentLabel={order.statusLabel}
+                        disabled={isOrderUpdating}
+                        onChange={(status) =>
+                          requestStatusChange(order.id, status, order.statusLabel)
+                        }
+                        status={order.status}
+                      />
+                    </td>
+                    <td>
+                      <PaymentStatusBadge
+                        label={order.paymentStatusLabel}
+                        value={order.paymentStatus}
+                      />
+                    </td>
+                    <td>
+                      <button onClick={() => handleOpenDetail(order)} type="button">
+                        Xem chi tiết
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : null}
@@ -982,12 +1353,30 @@ export default function OrderListPage() {
 
       {detailState.open ? (
         <OrderDetailModal
-          errorMessage={detailState.errorMessage}
-          loading={detailState.loading}
+          actionPending={actionPending}
+          errorMessage={detailErrorMessage}
+          loading={detailLoading}
+          onAssign={requestAssignOrder}
+          onCancelOrder={(orderId, reason) =>
+            cancelOrderMutation.mutateAsync({ orderId, reason })
+          }
           onClose={handleCloseDetail}
-          onStatusChange={handleUpdateOrderStatus}
-          order={detailState.order}
-          updating={updatingOrderId === detailState.orderId}
+          onRefundStatusChange={requestRefundStatusChange}
+          onStatusChange={requestStatusChange}
+          order={selectedOrder}
+          updating={actionPending}
+        />
+      ) : null}
+
+      {confirmAction ? (
+        <ConfirmDialog
+          confirmLabel={confirmAction.confirmLabel}
+          description={confirmAction.description}
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={handleConfirmAction}
+          pending={actionPending}
+          title={confirmAction.title}
+          tone={confirmAction.tone}
         />
       ) : null}
     </section>

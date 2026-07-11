@@ -8,6 +8,23 @@ const toBody = (request) => request.then((response) => response.data);
 const isFormDataPayload = (payload) =>
   typeof FormData !== "undefined" && payload instanceof FormData;
 const ADMIN_BRANDS_PAGE_SIZE = 100;
+const SUPPRESS_GLOBAL_ERROR_CONFIG = { suppressGlobalError: true };
+
+function isEndpointUnavailable(error) {
+  return [404, 405].includes(Number(error?.response?.status));
+}
+
+async function withEndpointFallback(primaryRequest, fallbackRequest) {
+  try {
+    return await primaryRequest();
+  } catch (error) {
+    if (!isEndpointUnavailable(error)) {
+      throw error;
+    }
+
+    return fallbackRequest(error);
+  }
+}
 
 function normalizeVnpayPaymentPayload(payload = {}) {
   const orderId = payload.order_id ?? payload.orderId;
@@ -207,8 +224,16 @@ export const profileService = {
 
 export const customerOrderService = {
   getOrders: () => toPayload(api.get(API_ENDPOINTS.customer.orders)),
-  getOrder: (orderId) =>
-    toPayload(api.get(API_ENDPOINTS.customer.order(orderId))),
+  getOrder: (orderId, config) =>
+    toPayload(api.get(API_ENDPOINTS.customer.order(orderId), config)),
+  cancelOrder: (orderId, payload = {}) =>
+    toPayload(
+      api.post(
+        API_ENDPOINTS.customer.orderCancel(orderId),
+        payload,
+        SUPPRESS_GLOBAL_ERROR_CONFIG,
+      ),
+    ),
 };
 
 export const cartService = {
@@ -312,8 +337,74 @@ export const adminService = {
   updateInventory: (inventoryId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.inventoryItem(inventoryId), payload)),
   getOrders: () => toPayload(api.get(API_ENDPOINTS.admin.orders)),
-  getOrder: (orderId) =>
-    toPayload(api.get(API_ENDPOINTS.admin.order(orderId))),
+  getOrder: (orderId, config) =>
+    toPayload(api.get(API_ENDPOINTS.admin.order(orderId), config)),
+  assignOrder: (orderId, payload = {}) =>
+    withEndpointFallback(
+      () =>
+        toPayload(
+          api.patch(
+            API_ENDPOINTS.admin.orderAssign(orderId),
+            payload,
+            SUPPRESS_GLOBAL_ERROR_CONFIG,
+          ),
+        ),
+      () =>
+        toPayload(
+          api.patch(
+            API_ENDPOINTS.admin.orderStatus(orderId),
+            {
+              ...payload,
+              status: "processing",
+            },
+            SUPPRESS_GLOBAL_ERROR_CONFIG,
+          ),
+        ),
+    ),
+  cancelOrder: (orderId, payload = {}) =>
+    withEndpointFallback(
+      () =>
+        toPayload(
+          api.patch(
+            API_ENDPOINTS.admin.orderCancel(orderId),
+            payload,
+            SUPPRESS_GLOBAL_ERROR_CONFIG,
+          ),
+        ),
+      () =>
+        toPayload(
+          api.patch(
+            API_ENDPOINTS.admin.orderStatus(orderId),
+            {
+              ...payload,
+              status: "cancelled",
+            },
+            SUPPRESS_GLOBAL_ERROR_CONFIG,
+          ),
+        ),
+    ),
+  updateRefundStatus: (orderId, payload = {}) =>
+    withEndpointFallback(
+      () =>
+        toPayload(
+          api.patch(
+            API_ENDPOINTS.admin.orderRefund(orderId),
+            payload,
+            SUPPRESS_GLOBAL_ERROR_CONFIG,
+          ),
+        ),
+      () =>
+        toPayload(
+          api.patch(
+            API_ENDPOINTS.admin.orderStatus(orderId),
+            {
+              ...payload,
+              status: payload.status || payload.refund_status || "refunding",
+            },
+            SUPPRESS_GLOBAL_ERROR_CONFIG,
+          ),
+        ),
+    ),
   updateOrderStatus: (orderId, payload) =>
     toPayload(api.patch(API_ENDPOINTS.admin.orderStatus(orderId), payload)),
   updateOrder: (orderId, payload) =>

@@ -242,7 +242,7 @@ api.interceptors.response.use(
       dispatchApiEvent(FORBIDDEN_EVENT, { reason: "forbidden" });
     }
 
-    if (status && !isLoginVerificationError) {
+    if (status && !isLoginVerificationError && !error.config?.suppressGlobalError) {
       dispatchHttpError(status);
     }
 

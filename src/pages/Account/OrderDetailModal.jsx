@@ -1,7 +1,14 @@
 import { getOrderCode } from "../../utils/orders";
 import OrderDetailView from "./OrderDetailView";
 
-export default function OrderDetailModal({ errorMessage, loading, onClose, order }) {
+export default function OrderDetailModal({
+  actionPending,
+  errorMessage,
+  loading,
+  onCancelOrder,
+  onClose,
+  order,
+}) {
   const orderCode = getOrderCode(order || {});
 
   return (
@@ -18,8 +25,10 @@ export default function OrderDetailModal({ errorMessage, loading, onClose, order
         </div>
 
         <OrderDetailView
+          actionPending={actionPending}
           errorMessage={errorMessage}
           loading={loading}
+          onCancelOrder={onCancelOrder}
           order={order}
         />
       </section>

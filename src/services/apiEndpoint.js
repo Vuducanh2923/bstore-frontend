@@ -41,6 +41,8 @@ export const API_ENDPOINTS = {
   customer: {
     orders: "/customer/orders",
     order: (orderId) => `/customer/orders/${encodeURIComponent(orderId)}`,
+    orderCancel: (orderId) =>
+      `/customer/orders/${encodeURIComponent(orderId)}/cancel`,
   },
   cart: {
     list: "/carts",
@@ -52,6 +54,7 @@ export const API_ENDPOINTS = {
     create: "/orders",
     list: "/orders",
     detail: (orderId) => `/orders/${encodeURIComponent(orderId)}`,
+    status: (orderId) => `/orders/${encodeURIComponent(orderId)}/status`,
   },
   payments: {
     list: "/payments",
@@ -86,6 +89,12 @@ export const API_ENDPOINTS = {
       `/inventories/${encodeURIComponent(inventoryId)}`,
     orders: "/admin/orders",
     order: (orderId) => `/admin/orders/${encodeURIComponent(orderId)}`,
+    orderAssign: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/assign`,
+    orderCancel: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/cancel`,
+    orderRefund: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/refund`,
     orderStatus: (orderId) =>
       `/admin/orders/${encodeURIComponent(orderId)}/status`,
   },

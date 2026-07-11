@@ -7,7 +7,8 @@ const PAYMENT_STATUS_MAP = {
   failed: { label: "Thanh toán thất bại", tone: "danger" },
   cancelled: { label: "Đã hủy", tone: "danger" },
   canceled: { label: "Đã hủy", tone: "danger" },
-  refunded: { label: "Đã hoàn tiền", tone: "info" },
+  refunding: { label: "Đang hoàn tiền", tone: "purple" },
+  refunded: { label: "Đã hoàn tiền", tone: "teal" },
   cod: { label: "Thanh toán khi nhận hàng", tone: "neutral" },
 };
 

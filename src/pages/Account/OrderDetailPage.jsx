@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { useToast } from "../../context/ToastContext";
 import { customerOrderService } from "../../services/bstoreService";
@@ -9,67 +9,44 @@ import OrderDetailView from "./OrderDetailView";
 export default function OrderDetailPage() {
   const { orderId } = useParams();
   const { showToast } = useToast();
-  const [state, setState] = useState({
-    errorMessage: "",
-    loading: true,
-    order: null,
+  const queryClient = useQueryClient();
+
+  const orderQuery = useQuery({
+    enabled: Boolean(orderId),
+    queryFn: async () => {
+      const payload = await customerOrderService.getOrder(orderId, {
+        suppressGlobalError: true,
+      });
+      return readOrder(payload);
+    },
+    queryKey: ["customer", "order", orderId],
   });
 
-  useEffect(() => {
-    let ignored = false;
+  const cancelOrderMutation = useMutation({
+    mutationFn: (reason) =>
+      customerOrderService.cancelOrder(orderId, {
+        cancel_reason: reason,
+        reason,
+      }),
+    onError: (error) => {
+      showToast(getStatusErrorMessage(error, "Không thể hủy đơn hàng."), "error");
+    },
+    onSuccess: async () => {
+      showToast("Đã gửi yêu cầu hủy đơn hàng.", "success");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["customer", "orders"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer", "order", orderId] }),
+      ]);
+    },
+  });
 
-    async function loadOrder() {
-      if (!orderId) {
-        setState({
-          errorMessage: "Không tìm thấy mã đơn hàng.",
-          loading: false,
-          order: null,
-        });
-        return;
-      }
-
-      setState((current) => ({
-        ...current,
-        errorMessage: "",
-        loading: true,
-      }));
-
-      try {
-        const payload = await customerOrderService.getOrder(orderId);
-        const order = readOrder(payload);
-
-        if (!ignored) {
-          setState({
-            errorMessage: "",
-            loading: false,
-            order,
-          });
-        }
-      } catch (error) {
-        const message = getStatusErrorMessage(
-          error,
-          "Không thể tải chi tiết đơn hàng.",
-        );
-
-        if (!ignored) {
-          setState({
-            errorMessage: message,
-            loading: false,
-            order: null,
-          });
-          showToast(message, "error");
-        }
-      }
-    }
-
-    loadOrder();
-
-    return () => {
-      ignored = true;
-    };
-  }, [orderId, showToast]);
-
-  const orderCode = getOrderCode(state.order || {});
+  const order = orderQuery.data || null;
+  const orderCode = getOrderCode(order || {});
+  const errorMessage = !orderId
+    ? "Không tìm thấy mã đơn hàng."
+    : orderQuery.error
+      ? getStatusErrorMessage(orderQuery.error, "Không thể tải chi tiết đơn hàng.")
+      : "";
 
   return (
     <main className="container order-detail-page">
@@ -85,9 +62,11 @@ export default function OrderDetailPage() {
 
       <section className="account-panel order-detail-page-panel">
         <OrderDetailView
-          errorMessage={state.errorMessage}
-          loading={state.loading}
-          order={state.order}
+          actionPending={cancelOrderMutation.isPending}
+          errorMessage={errorMessage}
+          loading={orderQuery.isLoading || orderQuery.isFetching}
+          onCancelOrder={(reason) => cancelOrderMutation.mutateAsync(reason)}
+          order={order}
         />
       </section>
     </main>

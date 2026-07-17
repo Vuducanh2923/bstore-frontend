@@ -2,6 +2,7 @@ import api, { getToken, readCollection, unwrapResponse } from "./api";
 import { API_ENDPOINTS } from "./apiEndpoint";
 import authApi from "./authApi";
 import orderApi from "./orderApi";
+import { cachedRequest, createRequestKey } from "../utils/requestCache";
 
 const toPayload = (request) => request.then(unwrapResponse);
 const toBody = (request) => request.then((response) => response.data);
@@ -28,25 +29,13 @@ async function withEndpointFallback(primaryRequest, fallbackRequest) {
 
 function normalizeVnpayPaymentPayload(payload = {}) {
   const orderId = payload.order_id ?? payload.orderId;
-  const amount = payload.amount;
 
   if (orderId === null || orderId === undefined || orderId === "") {
     throw new Error("Không thể tạo thanh toán VNPAY vì thiếu order_id.");
   }
 
-  if (amount === null || amount === undefined || amount === "") {
-    throw new Error("Không thể tạo thanh toán VNPAY vì thiếu amount.");
-  }
-
-  const numericAmount = Number(amount);
-
-  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-    throw new Error("Số tiền thanh toán VNPAY không hợp lệ.");
-  }
-
   return {
     order_id: orderId,
-    amount: numericAmount,
     order_info:
       payload.order_info ||
       payload.orderInfo ||
@@ -180,13 +169,29 @@ async function getAllAdminBrands(params = {}) {
 export const authService = authApi;
 
 export const productService = {
-  getProducts: (params) =>
-    toPayload(api.get(API_ENDPOINTS.products.list, { params })),
-  getSaleProducts: (params) =>
-    toPayload(api.get(API_ENDPOINTS.products.sale, { params })),
-  getProduct: (slug) => toPayload(api.get(API_ENDPOINTS.products.detail(slug))),
-  getCategories: () => toPayload(api.get(API_ENDPOINTS.categories.list)),
-  getBrands: () => toPayload(api.get(API_ENDPOINTS.brands.list)),
+  getProducts: (params = {}) => cachedRequest(
+    createRequestKey("products", params),
+    () => toPayload(api.get(API_ENDPOINTS.products.list, { params })),
+    { ttl: 60_000 },
+  ),
+  getSaleProducts: (params = {}) => cachedRequest(
+    createRequestKey("sale-products", params),
+    () => toPayload(api.get(API_ENDPOINTS.products.sale, { params })),
+    { ttl: 60_000 },
+  ),
+  getProduct: (slug) => cachedRequest(
+    `product:${slug}`,
+    () => toPayload(api.get(API_ENDPOINTS.products.detail(slug))),
+    { ttl: 60_000 },
+  ),
+  getCategories: () => cachedRequest(
+    "catalog:categories",
+    () => toPayload(api.get(API_ENDPOINTS.categories.list)),
+  ),
+  getBrands: () => cachedRequest(
+    "catalog:brands",
+    () => toPayload(api.get(API_ENDPOINTS.brands.list)),
+  ),
 };
 
 export const bannerService = {
@@ -237,7 +242,7 @@ export const customerOrderService = {
 };
 
 export const cartService = {
-  getCarts: () => toPayload(api.get(API_ENDPOINTS.cart.list)),
+  getCarts: (config = {}) => toPayload(api.get(API_ENDPOINTS.cart.list, config)),
   createCart: (payload) => toPayload(api.post(API_ENDPOINTS.cart.create, payload)),
   addItem: (payload) => toPayload(api.post(API_ENDPOINTS.cart.items, payload)),
   updateItem: (cartItemId, payload) =>
@@ -277,11 +282,11 @@ export const paymentService = {
 };
 
 export const adminService = {
-  getProducts: (params) =>
-    toBody(api.get(API_ENDPOINTS.admin.products, { params })),
+  getProducts: (params, config = {}) =>
+    toBody(api.get(API_ENDPOINTS.admin.products, { ...config, params })),
   getProduct: (productId) =>
     toPayload(api.get(API_ENDPOINTS.admin.product(productId))),
-  getBanners: () => toPayload(api.get(API_ENDPOINTS.admin.banners)),
+  getBanners: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.banners, config)),
   createBanner: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.banners, payload)),
   updateBanner: (bannerId, payload) =>
@@ -292,7 +297,7 @@ export const adminService = {
     ),
   deleteBanner: (bannerId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.banner(bannerId))),
-  getCategories: () => toPayload(api.get(API_ENDPOINTS.admin.categories)),
+  getCategories: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.categories, config)),
   createCategory: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.categories, payload)),
   updateCategory: (categoryId, payload) =>
@@ -300,11 +305,11 @@ export const adminService = {
   deleteCategory: (categoryId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.category(categoryId))),
   getBrands: (params) => getAllAdminBrands(params),
-  getRoles: () => toPayload(api.get(API_ENDPOINTS.admin.roles)),
+  getRoles: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.roles, config)),
   getUsers: () => toPayload(api.get(API_ENDPOINTS.admin.users)),
   updateUser: (userId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.user(userId), payload)),
-  getStaff: (params) => toBody(api.get(API_ENDPOINTS.admin.staff, { params })),
+  getStaff: (params, config = {}) => toBody(api.get(API_ENDPOINTS.admin.staff, { ...config, params })),
   createStaff: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.staff, payload)),
   updateStaff: (staffId, payload) =>
@@ -313,8 +318,8 @@ export const adminService = {
     toPayload(api.patch(API_ENDPOINTS.admin.staffStatus(staffId), payload)),
   deleteStaff: (staffId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.staffMember(staffId))),
-  getCustomers: (params) =>
-    toBody(api.get(API_ENDPOINTS.admin.customers, { params })),
+  getCustomers: (params, config = {}) =>
+    toBody(api.get(API_ENDPOINTS.admin.customers, { ...config, params })),
   getCustomer: (customerId) =>
     toPayload(api.get(API_ENDPOINTS.admin.customer(customerId))),
   updateCustomerStatus: (customerId, payload) =>
@@ -331,12 +336,12 @@ export const adminService = {
     toPayload(api.put(API_ENDPOINTS.admin.product(productId), payload)),
   deleteProduct: (productId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.product(productId))),
-  getInventory: () => toPayload(api.get(API_ENDPOINTS.admin.inventory)),
+  getInventory: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.inventory, config)),
   createInventory: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.inventory, payload)),
   updateInventory: (inventoryId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.inventoryItem(inventoryId), payload)),
-  getOrders: () => toPayload(api.get(API_ENDPOINTS.admin.orders)),
+  getOrders: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.orders, config)),
   getOrder: (orderId, config) =>
     toPayload(api.get(API_ENDPOINTS.admin.order(orderId), config)),
   assignOrder: (orderId, payload = {}) =>

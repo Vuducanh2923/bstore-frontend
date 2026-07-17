@@ -79,6 +79,7 @@ function CategoryMegaMenu({
   items = [],
   label,
   onNavigate,
+  onOpen,
 }) {
   const [open, setOpen] = useState(false);
   const [hoveredKey, setHoveredKey] = useState("");
@@ -101,7 +102,11 @@ function CategoryMegaMenu({
         aria-expanded={open}
         aria-haspopup="true"
         className={`nav-link header-dropdown-trigger${active ? " active" : ""}`}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen((current) => {
+          const nextOpen = !current;
+          if (nextOpen) onOpen?.();
+          return nextOpen;
+        })}
         type="button"
       >
         <span>{label}</span>
@@ -168,6 +173,7 @@ export default function HeaderMenu({
   brandsByCategory = {},
   categories = [],
   onNavigate,
+  onOpenCategories,
   open = false,
 }) {
   const location = useLocation();
@@ -209,6 +215,7 @@ export default function HeaderMenu({
           items={categoryItems}
           label="Danh mục"
           onNavigate={onNavigate}
+          onOpen={onOpenCategories}
         />
         <NavLink
           active={isProductsRoute && !currentCategory && !currentBrand}

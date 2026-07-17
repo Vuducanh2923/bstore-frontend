@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
@@ -285,6 +285,7 @@ export default function Header() {
   const backOfficeHref = [USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) ? "/admin" : "";
   const { totalQuantity } = useCart();
   const [brandsByCategory, setBrandsByCategory] = useState({});
+  const categoryBrandsRequestRef = useRef(null);
   const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState([]);
   const [keyword, setKeyword] = useState("");
@@ -341,16 +342,7 @@ export default function Header() {
 
       setBrands(nextBrands);
 
-      if (nextCategories.length) {
-        const nextBrandsByCategory = await loadCategoryBrands(
-          nextCategories,
-          nextBrands,
-        );
-
-        if (mounted) {
-          setBrandsByCategory(nextBrandsByCategory);
-        }
-      } else {
+      if (!nextCategories.length) {
         setBrandsByCategory({});
       }
     }
@@ -361,6 +353,21 @@ export default function Header() {
       mounted = false;
     };
   }, []);
+
+  const loadMenuBrands = useCallback(() => {
+    if (
+      !categories.length ||
+      Object.keys(brandsByCategory).length ||
+      categoryBrandsRequestRef.current
+    ) return;
+
+    categoryBrandsRequestRef.current = loadCategoryBrands(categories, brands)
+      .then(setBrandsByCategory)
+      .catch(() => {})
+      .finally(() => {
+        categoryBrandsRequestRef.current = null;
+      });
+  }, [brands, brandsByCategory, categories]);
 
   useEffect(() => {
     if (trimmedKeyword.length < 2) {
@@ -548,6 +555,7 @@ export default function Header() {
           brandsByCategory={brandsByCategory}
           categories={categories}
           onNavigate={closeMobileMenu}
+          onOpenCategories={loadMenuBrands}
           open={mobileOpen}
         />
 

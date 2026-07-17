@@ -95,7 +95,6 @@ function buildPendingVnpayOrder(order, fallbackAmount) {
 function buildVnpayPayload(pendingOrder) {
   return {
     order_id: pendingOrder.orderId,
-    amount: pendingOrder.amount,
     order_info: `Thanh toán đơn hàng #${pendingOrder.orderId}`,
   };
 }
@@ -226,26 +225,14 @@ export default function CheckoutPage() {
     try {
       const orderItems = items.map((item) => ({
         product_variant_id: item.variantId,
-        product_name: item.productName || item.product.name,
-        color: item.color,
-        ram: item.ram,
-        storage: item.storage,
-        price: item.price,
         quantity: item.quantity,
-        subtotal: item.price * item.quantity,
       }));
       const order = await orderApi.createOrder({
-        user_id: user.id,
         receiver_name: form.fullName,
         receiver_phone: form.phone,
         receiver_email: user?.email || null,
         shipping_address: form.address,
         shipping_method: "standard",
-        total_amount: totalAmount,
-        discount_amount: 0,
-        final_amount: totalAmount,
-        status: "pending",
-        payment_status: "pending",
         payment_method: form.paymentMethod,
         note: form.note,
         items: orderItems,
@@ -271,10 +258,6 @@ export default function CheckoutPage() {
 
       await paymentService.createPayment({
         order_id: orderId,
-        payment_method: "COD",
-        payment_provider: "cod",
-        amount: totalAmount,
-        status: "pending",
       });
 
       await Promise.allSettled(items.map((item) => removeItem(item.id)));

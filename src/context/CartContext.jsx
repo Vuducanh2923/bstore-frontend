@@ -15,6 +15,7 @@ import {
   normalizeProduct,
 } from "../utils/formatters";
 import { useAuth } from "./AuthContext";
+import { USER_ROLES } from "../utils/formatters";
 
 const CartContext = createContext(null);
 
@@ -93,7 +94,7 @@ function productToCartPayload(product, quantity) {
 }
 
 export function CartProvider({ children }) {
-  const { isAuthenticated, user } = useAuth();
+  const { initialized, isAuthenticated, role, user } = useAuth();
   const userId = user?.id;
   const [cartId, setCartId] = useState("");
   const [items, setItems] = useState([]);
@@ -130,8 +131,12 @@ export function CartProvider({ children }) {
     [userId],
   );
 
-  const refreshCart = useCallback(async () => {
-    if (!isAuthenticated || !userId) {
+  const refreshCart = useCallback(async (config = {}) => {
+    // The cart API is intentionally customer-owned. Admin and staff sessions
+    // must not probe it because a correct 403 would be mistaken for a page-level
+    // authorization failure by the global error handler.
+    const canUseCart = role === USER_ROLES.CUSTOMER;
+    if (!initialized || !isAuthenticated || !userId || !canUseCart) {
       setCartId("");
       setItems([]);
       return [];
@@ -141,23 +146,25 @@ export function CartProvider({ children }) {
     setError("");
 
     try {
-      const payload = await cartService.getCarts();
+      const payload = await cartService.getCarts(config);
       const carts = readCollection(payload, ["carts"]);
       const activeCart = findActiveUserCart(carts, userId);
 
       return applyCart(activeCart);
     } catch (err) {
+      if (err?.code === "ERR_CANCELED") return [];
       setError(getApiErrorMessage(err, "Không tải được giỏ hàng."));
       setItems([]);
       return [];
     } finally {
       setLoading(false);
     }
-  }, [applyCart, isAuthenticated, userId]);
+  }, [applyCart, initialized, isAuthenticated, role, userId]);
 
   useEffect(() => {
-    const timerId = window.setTimeout(refreshCart, 0);
-    return () => window.clearTimeout(timerId);
+    const controller = new AbortController();
+    Promise.resolve().then(() => refreshCart({ signal: controller.signal }));
+    return () => controller.abort();
   }, [refreshCart]);
 
   const addToCart = useCallback(
@@ -189,23 +196,23 @@ export function CartProvider({ children }) {
 
       if (!targetCartId) {
         const cart = await cartService.createCart({
-          user_id: userId,
-          status: "active",
-          items: [itemPayload],
+          items: [{
+            product_variant_id: itemPayload.product_variant_id,
+            quantity: itemPayload.quantity,
+          }],
         });
         return applyCart(cart);
       }
 
       if (existingItem) {
         await cartService.updateItem(existingItem.id, {
-          ...existingItem.raw,
           quantity: existingItem.quantity + quantity,
-          subtotal: existingItem.price * (existingItem.quantity + quantity),
         });
       } else {
         await cartService.addItem({
-          ...itemPayload,
           cart_id: Number(targetCartId),
+          product_variant_id: itemPayload.product_variant_id,
+          quantity: itemPayload.quantity,
         });
       }
 
@@ -216,16 +223,12 @@ export function CartProvider({ children }) {
 
   const updateQuantity = useCallback(
     async (cartItemId, quantity) => {
-      const item = items.find((current) => String(current.id) === String(cartItemId));
-
       await cartService.updateItem(cartItemId, {
-        ...(item?.raw || {}),
         quantity,
-        subtotal: Number(item?.price || 0) * quantity,
       });
       return refreshCart();
     },
-    [items, refreshCart],
+    [refreshCart],
   );
 
   const removeItem = useCallback(

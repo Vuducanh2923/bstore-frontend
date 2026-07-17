@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   BrowserRouter,
@@ -17,12 +17,6 @@ import { ToastProvider } from "./context/ToastContext";
 import { FORBIDDEN_EVENT, UNAUTHORIZED_EVENT } from "./services/api";
 import AdminLayout from "./layouts/AdminLayout";
 import UserLayout from "./layouts/UserLayout";
-import BrandPage from "./pages/Admin/Brands/BrandPage";
-import AdminDashboardPage from "./pages/Admin/AdminDashboardPage";
-import CustomerDetailPage from "./pages/Admin/Customers/CustomerDetailPage";
-import CustomerListPage from "./pages/Admin/Customers/CustomerListPage";
-import OrderListPage from "./pages/Admin/Orders/OrderListPage";
-import StaffListPage from "./pages/Admin/Staff/StaffListPage";
 import AccountPage from "./pages/Account/AccountPage";
 import OrderDetailPage from "./pages/Account/OrderDetailPage";
 import ForgotPasswordPage from "./pages/Auth/ForgotPasswordPage";
@@ -40,12 +34,23 @@ import ProductDetailPage from "./pages/ProductDetail/ProductDetailPage";
 import ProductsPage from "./pages/Products/ProductsPage";
 import { USER_ROLES } from "./utils/formatters";
 
+const AdminDashboardPage = lazy(() => import("./pages/Admin/AdminDashboardPage"));
+const BrandPage = lazy(() => import("./pages/Admin/Brands/BrandPage"));
+const CustomerDetailPage = lazy(() => import("./pages/Admin/Customers/CustomerDetailPage"));
+const CustomerListPage = lazy(() => import("./pages/Admin/Customers/CustomerListPage"));
+const OrderListPage = lazy(() => import("./pages/Admin/Orders/OrderListPage"));
+const StaffListPage = lazy(() => import("./pages/Admin/Staff/StaffListPage"));
+
+function RouteFallback() {
+  return <main className="page-loading" aria-busy="true">Äang táº£i...</main>;
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
-      staleTime: 30_000,
+      staleTime: 5 * 60_000,
     },
   },
 });
@@ -103,6 +108,7 @@ function App() {
           <AuthProvider>
             <ApiNavigationEvents />
             <CartProvider>
+              <Suspense fallback={<RouteFallback />}>
               <Routes>
               <Route element={<UserLayout />}>
                 <Route index element={<HomePage />} />
@@ -175,6 +181,11 @@ function App() {
                 path="admin"
               >
                 <Route index element={<AdminDashboardPage />} />
+                <Route path="products" element={<AdminDashboardPage page="products" />} />
+                <Route path="banners" element={<AdminDashboardPage page="banners" />} />
+                <Route path="categories" element={<AdminDashboardPage page="categories" />} />
+                <Route path="inventory" element={<AdminDashboardPage page="inventory" />} />
+                <Route path="settings" element={<AdminDashboardPage page="settings" />} />
                 <Route path="brands" element={<BrandPage />} />
                 <Route path="customers" element={<CustomerListPage />} />
                 <Route path="customers/:id" element={<CustomerDetailPage />} />
@@ -190,6 +201,7 @@ function App() {
               </Route>
               <Route path="*" element={<Navigate replace to="/" />} />
               </Routes>
+              </Suspense>
             </CartProvider>
           </AuthProvider>
         </ToastProvider>

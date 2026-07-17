@@ -1,4 +1,4 @@
-import api, { unwrapResponse } from "./api";
+import api, { getRefreshToken, unwrapResponse } from "./api";
 import { API_ENDPOINTS } from "./apiEndpoint";
 
 const toPayload = (request) => request.then(unwrapResponse);
@@ -31,6 +31,14 @@ const authApi = {
     toPayload(api.post(API_ENDPOINTS.auth.register, payload)),
   login: (payload) =>
     toPayload(api.post(API_ENDPOINTS.auth.login, normalizeLoginPayload(payload))),
+  logout: () =>
+    toPayload(
+      api.post(
+        API_ENDPOINTS.auth.logout,
+        { refresh_token: getRefreshToken() || undefined },
+        { suppressGlobalError: true },
+      ),
+    ),
   me: () => toPayload(api.get(API_ENDPOINTS.auth.me)),
   verifyRegisterOtp: (payload) =>
     toPayload(

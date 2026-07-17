@@ -4,13 +4,13 @@ import { getRole, USER_ROLES } from "../utils/formatters";
 
 const navItems = [
   { icon: "D", label: "Dashboard", tab: "dashboard", to: "/admin" },
-  { icon: "P", label: "Products", tab: "products", to: "/admin?tab=products" },
-  { icon: "B", label: "Banners", tab: "banners", to: "/admin?tab=banners" },
-  { icon: "C", label: "Categories", tab: "categories", to: "/admin?tab=categories" },
+  { icon: "P", label: "Products", match: "/admin/products", to: "/admin/products" },
+  { icon: "B", label: "Banners", match: "/admin/banners", to: "/admin/banners" },
+  { icon: "C", label: "Categories", match: "/admin/categories", to: "/admin/categories" },
   { icon: "T", label: "Brands", match: "/admin/brands", to: "/admin/brands" },
   { icon: "O", label: "Orders", match: "/admin/orders", to: "/admin/orders" },
-  { icon: "I", label: "Inventory", tab: "inventory", to: "/admin?tab=inventory" },
-  { icon: "G", label: "Settings", tab: "settings", to: "/admin?tab=settings" },
+  { icon: "I", label: "Inventory", match: "/admin/inventory", to: "/admin/inventory" },
+  { icon: "G", label: "Settings", match: "/admin/settings", to: "/admin/settings" },
 ];
 
 const userNavItems = [
@@ -48,6 +48,12 @@ export default function AdminLayout() {
       : location.pathname === "/admin" && activeTab === item.tab;
   const adminName = user?.full_name || user?.name || user?.email || "Admin";
   const roleLabel = currentRole === USER_ROLES.ADMIN ? "System Admin" : "Staff";
+  const today = new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    weekday: "long",
+    year: "numeric",
+  }).format(new Date());
 
   return (
     <div className="admin-shell">
@@ -95,18 +101,10 @@ export default function AdminLayout() {
         </div>
       </aside>
       <main className="admin-main">
-        <header className="admin-topbar">
-          <form className="admin-search">
-            <span>Search</span>
-            <input placeholder="Search analytics, orders, or customers..." />
-          </form>
-          <div className="admin-topbar-actions">
-            <button aria-label="Notifications" type="button">
-              N
-            </button>
-            <button aria-label="Account" type="button">
-              A
-            </button>
+        <header className="admin-topbar admin-welcome-header">
+          <div>
+            <strong>Xin chào, {adminName}</strong>
+            <span>Hôm nay là {today}</span>
           </div>
         </header>
         <Outlet />

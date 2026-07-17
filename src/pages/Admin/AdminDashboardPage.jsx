@@ -105,6 +105,7 @@ const PRODUCT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_PRODUCT_IMAGE_SIZE = 5 * 1024 * 1024;
 const ADMIN_PRODUCT_PAGE_SIZE = 12;
 const ADMIN_USER_PAGE_SIZE = 10;
+const ADMIN_INVENTORY_PAGE_SIZE = 12;
 const CUSTOMER_STATUS_FILTERS = ["all", "active", "locked", "suspended"];
 const ADMIN_TABS = new Set([
   "dashboard",
@@ -990,14 +991,21 @@ function normalizeManagedUserPage(payload = {}, keys = [], fallbackPage = 1) {
 function normalizeInventoryItems(payload = {}, productList = []) {
   return readCollection(payload, ["inventories", "inventory"]).map((item) => {
     const variant = item.variant || {};
+    const variantId =
+      variant.id ?? item.product_variant_id ?? item.productVariantId ?? item.variant_id;
     const product = productList.find(
-      (current) => Number(current.id) === Number(variant.product_id),
+      (current) =>
+        Number(current.id) ===
+        Number(variant.product_id ?? item.product_id ?? item.productId),
     );
 
     return {
       id: item.id,
       productName:
-        product?.name || variant.product?.name || `Variant #${variant.id}`,
+        product?.name ||
+        variant.product?.name ||
+        item.product?.name ||
+        (variantId ? `Variant #${variantId}` : "Sản phẩm chưa xác định"),
       variantLabel: [variant.color, variant.ram, variant.storage]
         .filter(Boolean)
         .join(" / "),
@@ -1311,11 +1319,11 @@ function StaffFormModal({
   );
 }
 
-export default function AdminDashboardPage() {
+export default function AdminDashboardPage({ page }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const tab = searchParams.get("tab") || "dashboard";
+  const { initialized, isAuthenticated, token, user } = useAuth();
+  const tab = page || searchParams.get("tab") || "dashboard";
   const currentRole = getRole(user);
   const allowedTabs = currentRole === USER_ROLES.STAFF ? STAFF_TABS : ADMIN_TABS;
   const canManageStaff = currentRole === USER_ROLES.ADMIN;
@@ -1329,6 +1337,7 @@ export default function AdminDashboardPage() {
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
   const [inventory, setInventory] = useState([]);
+  const [inventoryPage, setInventoryPage] = useState(1);
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -1363,8 +1372,9 @@ export default function AdminDashboardPage() {
   const [pendingSaleConfirmation, setPendingSaleConfirmation] = useState(null);
   const [message, setMessage] = useState("");
 
-  const loadAdminData = useCallback(async () => {
-    if (![USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) || !allowedTabs.has(tab)) {
+  const loadAdminData = useCallback(async (config = {}) => {
+    if (!initialized || !isAuthenticated || !token ||
+      ![USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) || !allowedTabs.has(tab)) {
       return;
     }
 
@@ -1372,6 +1382,7 @@ export default function AdminDashboardPage() {
     setMessage("");
 
     const productRequestPage = tab === "products" ? productPage : 1;
+    const productRequestPageSize = tab === "inventory" ? 100 : ADMIN_PRODUCT_PAGE_SIZE;
     const productSearch =
       tab === "products" ? tabSearch.products.trim() || undefined : undefined;
     const staffSearch =
@@ -1389,18 +1400,18 @@ export default function AdminDashboardPage() {
         "products",
         adminService.getProducts({
           page: productRequestPage,
-          per_page: ADMIN_PRODUCT_PAGE_SIZE,
+          per_page: productRequestPageSize,
           search: productSearch,
-        }),
+        }, config),
       );
     }
 
     if (["dashboard", "banners"].includes(tab)) {
-      addRequest("banners", adminService.getBanners());
+      addRequest("banners", adminService.getBanners(config));
     }
 
     if (["products", "categories"].includes(tab)) {
-      addRequest("categories", adminService.getCategories());
+      addRequest("categories", adminService.getCategories(config));
     }
 
     if (tab === "products") {
@@ -1408,15 +1419,15 @@ export default function AdminDashboardPage() {
     }
 
     if (["dashboard", "inventory"].includes(tab)) {
-      addRequest("inventory", adminService.getInventory());
+      addRequest("inventory", adminService.getInventory(config));
     }
 
     if (["dashboard", "orders"].includes(tab)) {
-      addRequest("orders", adminService.getOrders());
+      addRequest("orders", adminService.getOrders(config));
     }
 
     if (tab === "users") {
-      addRequest("roles", adminService.getRoles());
+      addRequest("roles", adminService.getRoles(config));
     }
 
     if (tab === "staff" && canManageStaff) {
@@ -1426,7 +1437,7 @@ export default function AdminDashboardPage() {
           page: staffPage,
           per_page: ADMIN_USER_PAGE_SIZE,
           search: staffSearch,
-        }),
+        }, config),
       );
     }
 
@@ -1439,7 +1450,7 @@ export default function AdminDashboardPage() {
           search: customerSearch,
           status:
             customerStatusFilter === "all" ? undefined : customerStatusFilter,
-        }),
+        }, config),
       );
     }
 
@@ -1528,7 +1539,7 @@ export default function AdminDashboardPage() {
       );
     }
 
-    setLoading(false);
+    if (!config.signal?.aborted) setLoading(false);
   }, [
     allowedTabs,
     canManageCustomers,
@@ -1536,17 +1547,21 @@ export default function AdminDashboardPage() {
     customerPage,
     customerStatusFilter,
     currentRole,
+    initialized,
+    isAuthenticated,
     productPage,
     staffPage,
     tab,
     tabSearch.customers,
     tabSearch.products,
     tabSearch.staff,
+    token,
   ]);
 
   useEffect(() => {
-    const timerId = window.setTimeout(loadAdminData, 0);
-    return () => window.clearTimeout(timerId);
+    const controller = new AbortController();
+    Promise.resolve().then(() => loadAdminData({ signal: controller.signal }));
+    return () => controller.abort();
   }, [loadAdminData]);
 
   useEffect(() => {
@@ -1660,6 +1675,21 @@ export default function AdminDashboardPage() {
       ),
     [inventory, tabSearch.inventory],
   );
+  const inventoryPagination = useMemo(() => {
+    const total = filteredInventory.length;
+    const lastPage = Math.max(1, Math.ceil(total / ADMIN_INVENTORY_PAGE_SIZE));
+    return {
+      currentPage: Math.min(inventoryPage, lastPage),
+      lastPage,
+      perPage: ADMIN_INVENTORY_PAGE_SIZE,
+      total,
+    };
+  }, [filteredInventory.length, inventoryPage]);
+  const pagedInventory = useMemo(() => {
+    const start =
+      (inventoryPagination.currentPage - 1) * inventoryPagination.perPage;
+    return filteredInventory.slice(start, start + inventoryPagination.perPage);
+  }, [filteredInventory, inventoryPagination]);
   const filteredUsers = useMemo(
     () =>
       users.filter((managedUser) =>
@@ -1800,12 +1830,17 @@ export default function AdminDashboardPage() {
     return options;
   }, [categories, productForm.categoryId, productForm.categoryName]);
   const handleTab = (nextTab) => {
-    if (nextTab === "orders") {
-      navigate("/admin/orders");
-      return;
-    }
-
-    setSearchParams(nextTab === "dashboard" ? {} : { tab: nextTab });
+    const pageRoutes = {
+      banners: "/admin/banners",
+      categories: "/admin/categories",
+      dashboard: "/admin",
+      inventory: "/admin/inventory",
+      orders: "/admin/orders",
+      products: "/admin/products",
+      settings: "/admin/settings",
+    };
+    if (pageRoutes[nextTab]) navigate(pageRoutes[nextTab]);
+    else setSearchParams(nextTab === "dashboard" ? {} : { tab: nextTab });
   };
 
   const handleTabSearchChange = (tabKey, value) => {
@@ -1824,6 +1859,10 @@ export default function AdminDashboardPage() {
 
     if (tabKey === "customers") {
       setCustomerPage(1);
+    }
+
+    if (tabKey === "inventory") {
+      setInventoryPage(1);
     }
   };
 
@@ -3790,7 +3829,7 @@ export default function AdminDashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredInventory.map((item) => (
+                {pagedInventory.map((item) => (
                   <tr key={item.id || item.productName}>
                     <td>{item.productName}</td>
                     <td>{item.variantLabel || "Mặc định"}</td>
@@ -3805,14 +3844,29 @@ export default function AdminDashboardPage() {
                       />
                     </td>
                     <td>
-                      <button onClick={() => handleSaveInventory(item)} type="button">
+                      <button
+                        disabled={saving}
+                        onClick={() => handleSaveInventory(item)}
+                        type="button"
+                      >
                         Lưu kho
                       </button>
                     </td>
                   </tr>
                 ))}
+                {pagedInventory.length === 0 ? (
+                  <tr>
+                    <td colSpan="4">Không có dữ liệu tồn kho phù hợp.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
+            <AdminPagination
+              disabled={loading || saving}
+              label="Tồn kho"
+              onPageChange={setInventoryPage}
+              pagination={inventoryPagination}
+            />
           </div>
         </>
       ) : null}

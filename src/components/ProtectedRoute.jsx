@@ -3,9 +3,11 @@ import { useAuth } from "../context/AuthContext";
 import { getRole } from "../utils/formatters";
 
 export default function ProtectedRoute({ children, roles }) {
-  const { isAuthenticated, user } = useAuth();
+  const { initialized, isAuthenticated, user } = useAuth();
   const location = useLocation();
   const currentRole = getRole(user);
+
+  if (!initialized) return null;
 
   if (!isAuthenticated) {
     return <Navigate replace state={{ from: location }} to="/login" />;

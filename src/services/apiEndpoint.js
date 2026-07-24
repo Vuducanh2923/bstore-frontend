@@ -45,6 +45,11 @@ export const API_ENDPOINTS = {
     order: (orderId) => `/customer/orders/${encodeURIComponent(orderId)}`,
     orderCancel: (orderId) =>
       `/customer/orders/${encodeURIComponent(orderId)}/cancel`,
+    warrantyRequests: "/customer/warranty-requests",
+    warrantyRequest: (requestId) =>
+      `/customer/warranty-requests/${encodeURIComponent(requestId)}`,
+    warrantyRequestCancel: (requestId) =>
+      `/customer/warranty-requests/${encodeURIComponent(requestId)}/cancel`,
   },
   cart: {
     list: "/carts",
@@ -99,5 +104,16 @@ export const API_ENDPOINTS = {
       `/admin/orders/${encodeURIComponent(orderId)}/refund`,
     orderStatus: (orderId) =>
       `/admin/orders/${encodeURIComponent(orderId)}/status`,
+    warrantyRequests: "/admin/warranty-requests",
+    warrantyRequest: (requestId) =>
+      `/admin/warranty-requests/${encodeURIComponent(requestId)}`,
+    warrantyApprove: (requestId) =>
+      `/admin/warranty-requests/${encodeURIComponent(requestId)}/approve`,
+    warrantyReject: (requestId) =>
+      `/admin/warranty-requests/${encodeURIComponent(requestId)}/reject`,
+    warrantyProcessing: (requestId) =>
+      `/admin/warranty-requests/${encodeURIComponent(requestId)}/processing`,
+    warrantyComplete: (requestId) =>
+      `/admin/warranty-requests/${encodeURIComponent(requestId)}/complete`,
   },
 };

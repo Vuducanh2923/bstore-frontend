@@ -40,6 +40,11 @@ const CustomerDetailPage = lazy(() => import("./pages/Admin/Customers/CustomerDe
 const CustomerListPage = lazy(() => import("./pages/Admin/Customers/CustomerListPage"));
 const OrderListPage = lazy(() => import("./pages/Admin/Orders/OrderListPage"));
 const StaffListPage = lazy(() => import("./pages/Admin/Staff/StaffListPage"));
+const WarrantyRequestsPage = lazy(() => import("./pages/Account/WarrantyRequestsPage"));
+const WarrantyRequestDetailPage = lazy(() => import("./pages/Account/WarrantyRequestDetailPage"));
+const CreateWarrantyRequestPage = lazy(() => import("./pages/Account/CreateWarrantyRequestPage"));
+const WarrantyManagementPage = lazy(() => import("./pages/Admin/Warranty/WarrantyManagementPage"));
+const WarrantyDetailPage = lazy(() => import("./pages/Admin/Warranty/WarrantyDetailPage"));
 
 function RouteFallback() {
   return <main className="page-loading" aria-busy="true">Äang táº£i...</main>;
@@ -171,6 +176,15 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
+                <Route path="account/warranty-requests" element={
+                  <ProtectedRoute roles={[USER_ROLES.CUSTOMER]}><WarrantyRequestsPage /></ProtectedRoute>
+                } />
+                <Route path="account/warranty-requests/create" element={
+                  <ProtectedRoute roles={[USER_ROLES.CUSTOMER]}><CreateWarrantyRequestPage /></ProtectedRoute>
+                } />
+                <Route path="account/warranty-requests/:id" element={
+                  <ProtectedRoute roles={[USER_ROLES.CUSTOMER]}><WarrantyRequestDetailPage /></ProtectedRoute>
+                } />
               </Route>
               <Route
                 element={
@@ -190,6 +204,8 @@ function App() {
                 <Route path="customers" element={<CustomerListPage />} />
                 <Route path="customers/:id" element={<CustomerDetailPage />} />
                 <Route path="orders" element={<OrderListPage />} />
+                <Route path="warranty-requests" element={<WarrantyManagementPage />} />
+                <Route path="warranty-requests/:id" element={<WarrantyDetailPage />} />
                 <Route
                   path="staff"
                   element={

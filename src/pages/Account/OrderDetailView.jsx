@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import PaymentStatusBadge from "../../components/PaymentStatusBadge";
 import StatusBadge from "../../components/StatusBadge";
 import StatusMessage from "../../components/StatusMessage";
@@ -186,6 +187,7 @@ export default function OrderDetailView({
   const normalizedOrder = readOrder(order || {});
   const receiver = getReceiver(normalizedOrder);
   const items = getOrderItems(normalizedOrder).map(normalizeOrderItem);
+  const rawItems = getOrderItems(normalizedOrder);
   const shippingMethod = displayText(
     normalizedOrder.shipping_method ||
       normalizedOrder.delivery_method ||
@@ -323,6 +325,7 @@ export default function OrderDetailView({
                       <th>Số lượng</th>
                       <th>Đơn giá</th>
                       <th>Thành tiền</th>
+                      <th>Bảo hành</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -335,11 +338,37 @@ export default function OrderDetailView({
                         <td>{item.quantity}</td>
                         <td>{formatCurrency(item.price)}</td>
                         <td>{formatCurrency(item.subtotal)}</td>
+                        <td>
+                          {(() => {
+                            const raw = rawItems[index] || {};
+                            const orderStatus = normalizeWorkflowKey(status);
+                            const policy = raw.warranty_policy || raw.product?.warranty_policy;
+                            const expiry = raw.warranty_expiry_date || raw.warranty_end_date;
+                            const active = raw.has_active_warranty_request ||
+                              raw.active_warranty_request ||
+                              ["pending", "approved", "processing"].includes(
+                                String(raw.warranty_request?.status || raw.warranty_status || "").toLowerCase(),
+                              );
+                            let reason = "";
+                            if (!["delivered", "completed"].includes(orderStatus)) reason = "Đơn hàng chưa được giao.";
+                            else if (!policy && !raw.has_warranty) reason = "Sản phẩm không có bảo hành.";
+                            else if (expiry && new Date(expiry).getTime() < Date.now()) reason = "Sản phẩm đã hết hạn bảo hành.";
+                            else if (active) reason = "Đã có yêu cầu đang xử lý.";
+                            const itemId = raw.id ?? raw.order_item_id ?? raw.orderItemId;
+                            const orderId = normalizedOrder.id ?? normalizedOrder.order_id;
+                            return reason ? <span className="muted-text warranty-disabled-reason">{reason}</span> : (
+                              <Link className="table-link-button"
+                                to={`/account/warranty-requests/create?orderId=${encodeURIComponent(orderId)}&orderItemId=${encodeURIComponent(itemId)}`}>
+                                Yêu cầu bảo hành
+                              </Link>
+                            );
+                          })()}
+                        </td>
                       </tr>
                     ))}
                     {items.length === 0 ? (
                       <tr>
-                        <td colSpan="5">Không có sản phẩm trong đơn hàng.</td>
+                        <td colSpan="6">Không có sản phẩm trong đơn hàng.</td>
                       </tr>
                     ) : null}
                   </tbody>

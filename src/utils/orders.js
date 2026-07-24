@@ -155,6 +155,8 @@ export function normalizeOrderItem(item = {}) {
 
   return {
     color: displayText(item.color || variant.color, ""),
+    id: item.id ?? item.order_item_id ?? item.orderItemId,
+    image: item.product_image || item.image || product.thumbnail || product.image || variant.image || "",
     price,
     productName: displayText(
       item.product_name ||

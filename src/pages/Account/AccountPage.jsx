@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import AddressManager from "./AddressManager";
 import ChangePasswordForm from "./ChangePasswordForm";
 import OrderHistory from "./OrderHistory";
@@ -66,6 +67,9 @@ export default function AccountPage() {
                 {tab.label}
               </button>
             ))}
+            <Link className="account-tab-link" to="/account/warranty-requests">
+              Yêu cầu bảo hành
+            </Link>
           </aside>
           <div className="account-content">{currentTab.render()}</div>
         </div>

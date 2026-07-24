@@ -9,6 +9,7 @@ const navItems = [
   { icon: "C", label: "Categories", match: "/admin/categories", to: "/admin/categories" },
   { icon: "T", label: "Brands", match: "/admin/brands", to: "/admin/brands" },
   { icon: "O", label: "Orders", match: "/admin/orders", to: "/admin/orders" },
+  { icon: "W", label: "Warranty", match: "/admin/warranty-requests", to: "/admin/warranty-requests" },
   { icon: "I", label: "Inventory", match: "/admin/inventory", to: "/admin/inventory" },
   { icon: "G", label: "Settings", match: "/admin/settings", to: "/admin/settings" },
 ];

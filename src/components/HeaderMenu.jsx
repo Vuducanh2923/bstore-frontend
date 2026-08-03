@@ -240,9 +240,14 @@ export default function HeaderMenu({
           label="Chính sách"
           onNavigate={onNavigate}
         />
-        <NavLink active={location.pathname === "/contact"} onNavigate={onNavigate} to="/contact">
+        <a
+          href="https://www.facebook.com/BstoreLVTN"
+          onClick={onNavigate}
+          rel="noreferrer"
+          target="_blank"
+        >
           Liên hệ
-        </NavLink>
+        </a>
       </nav>
     </div>
   );

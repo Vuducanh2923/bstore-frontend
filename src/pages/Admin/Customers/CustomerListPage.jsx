@@ -157,7 +157,7 @@ export default function CustomerListPage() {
     try {
       await adminService.updateCustomerStatus(customer.id, { status: nextStatus });
       showToast(
-        nextStatus === "active" ? "Đã mở khóa customer." : "Đã khóa customer.",
+        nextStatus === "active" ? "Đã mở khóa khách hàng." : "Đã khóa khách hàng.",
         "success",
       );
       setRefreshKey((current) => current + 1);

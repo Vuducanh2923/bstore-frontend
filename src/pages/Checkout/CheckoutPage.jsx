@@ -7,6 +7,7 @@ import { useToast } from "../../context/ToastContext";
 import { getApiErrorMessage } from "../../services/api";
 import { customerOrderService, paymentService } from "../../services/bstoreService";
 import orderApi from "../../services/orderApi";
+import { previewDiscountCode } from "../../services/discountCodeApi";
 import { formatCurrency, getPaymentRedirectUrl } from "../../utils/formatters";
 import { getOrderCode, getOrderId, readOrder } from "../../utils/orders";
 import {
@@ -22,6 +23,8 @@ const VNPAY_PENDING_MESSAGE =
   "Đơn hàng đã được tạo nhưng chưa thanh toán. Vui lòng bấm Thanh toán lại.";
 const VNPAY_NOT_RETRYABLE_MESSAGE =
   "Đơn hàng không còn ở trạng thái chờ thanh toán.";
+const COD_PAYMENT_PENDING_MESSAGE =
+  "Đơn hàng đã được tạo. Trạng thái thanh toán COD đang được cập nhật.";
 const PAID_OR_CLOSED_PAYMENT_STATUSES = new Set([
   "paid",
   "success",
@@ -131,11 +134,15 @@ export default function CheckoutPage() {
     phone: user?.phone || "",
     address: "",
     note: "",
+    discountCode: "",
     paymentMethod: initialPendingVnpayOrder
       ? "VNPAY"
       : getInitialPaymentMethod(searchParams),
   });
   const [loading, setLoading] = useState(false);
+  const [discountLoading, setDiscountLoading] = useState(false);
+  const [discountError, setDiscountError] = useState("");
+  const [appliedDiscount, setAppliedDiscount] = useState(null);
   const [message, setMessage] = useState("");
   const [pendingVnpayOrder, setPendingVnpayOrder] = useState(
     initialPendingVnpayOrder,
@@ -147,6 +154,36 @@ export default function CheckoutPage() {
       ...current,
       [event.target.name]: event.target.value,
     }));
+  };
+
+  const handleApplyDiscount = async () => {
+    const code = form.discountCode.trim().toUpperCase();
+    if (!code) {
+      setDiscountError("Vui lòng nhập mã giảm giá.");
+      return;
+    }
+
+    setDiscountLoading(true);
+    setDiscountError("");
+    try {
+      const result = await previewDiscountCode({
+        discount_code: code,
+        subtotal: totalAmount,
+      });
+      setAppliedDiscount({
+        code: result.discount_code || code,
+        discountAmount: Number(result.discount_amount || 0),
+        finalAmount: Number(result.final_amount ?? totalAmount),
+      });
+      showToast("Áp dụng mã giảm giá thành công.", "success");
+    } catch (error) {
+      setAppliedDiscount(null);
+      const apiMessage = getApiErrorMessage(error, "Mã giảm giá không hợp lệ.");
+      setDiscountError(apiMessage);
+      showToast(apiMessage, "error");
+    } finally {
+      setDiscountLoading(false);
+    }
   };
 
   const redirectToVnpay = async (pendingOrder) => {
@@ -218,6 +255,12 @@ export default function CheckoutPage() {
       return;
     }
 
+    const normalizedDiscountCode = form.discountCode.trim().toUpperCase();
+    if (normalizedDiscountCode && appliedDiscount?.code !== normalizedDiscountCode) {
+      setDiscountError("Vui lòng áp dụng mã giảm giá trước khi đặt hàng.");
+      return;
+    }
+
     checkoutInFlightRef.current = true;
     setLoading(true);
     setMessage("");
@@ -235,9 +278,11 @@ export default function CheckoutPage() {
         shipping_method: "standard",
         payment_method: form.paymentMethod,
         note: form.note,
+        discounts: normalizedDiscountCode
+          ? [{ discount_code: normalizedDiscountCode }]
+          : [],
         items: orderItems,
       });
-      console.log("Created order:", order);
 
       const pendingOrder = buildPendingVnpayOrder(order, totalAmount);
       const orderId = pendingOrder.orderId;
@@ -256,9 +301,23 @@ export default function CheckoutPage() {
         return;
       }
 
-      await paymentService.createPayment({
-        order_id: orderId,
-      });
+      try {
+        await paymentService.createPayment({
+          amount: pendingOrder.amount,
+          order_id: orderId,
+          payment_method: "COD",
+          payment_provider: "cod",
+          status: "pending",
+        });
+      } catch {
+        await Promise.allSettled(items.map((item) => removeItem(item.id)));
+        await refreshCart();
+
+        showToast(COD_PAYMENT_PENDING_MESSAGE, "warning");
+        setMessage(COD_PAYMENT_PENDING_MESSAGE);
+        navigate(`/account/orders/${encodeURIComponent(orderId)}`);
+        return;
+      }
 
       await Promise.allSettled(items.map((item) => removeItem(item.id)));
       await refreshCart();
@@ -341,6 +400,38 @@ export default function CheckoutPage() {
               value={form.note}
             />
           </label>
+          <div className="checkout-discount-field">
+          <label>
+            Mã giảm giá
+            <input
+              autoCapitalize="characters"
+              disabled={Boolean(pendingVnpayOrder)}
+              name="discountCode"
+              onChange={(event) => {
+                setForm((current) => ({
+                  ...current,
+                  discountCode: event.target.value.toUpperCase().replace(/\s/g, ""),
+                }));
+                setAppliedDiscount(null);
+                setDiscountError("");
+              }}
+              placeholder="Nhập mã giảm giá"
+              value={form.discountCode}
+            />
+            <small className="muted-text">
+              Mã được Backend kiểm tra và tính trực tiếp vào báo giá.
+            </small>
+          </label>
+          <button
+            className="secondary-button"
+            disabled={discountLoading || !form.discountCode.trim()}
+            onClick={handleApplyDiscount}
+            type="button"
+          >
+            {discountLoading ? "Đang kiểm tra..." : appliedDiscount ? "Áp dụng lại" : "Áp dụng"}
+          </button>
+          {discountError ? <small className="field-error">{discountError}</small> : null}
+          </div>
           <div className="payment-options">
             <label className={form.paymentMethod === "COD" ? "selected" : ""}>
               <input
@@ -413,10 +504,26 @@ export default function CheckoutPage() {
               <strong>{formatCurrency(item.price * item.quantity)}</strong>
             </div>
           ))}
+          {!pendingVnpayOrder ? (
+            <div className="summary-subtotal">
+              <span>Tạm tính</span>
+              <strong>{formatCurrency(totalAmount)}</strong>
+            </div>
+          ) : null}
+          {appliedDiscount && !pendingVnpayOrder ? (
+            <div className="summary-discount">
+              <span>Giảm giá ({appliedDiscount.code})</span>
+              <strong>-{formatCurrency(appliedDiscount.discountAmount)}</strong>
+            </div>
+          ) : null}
           <div className="summary-total">
             <span>Tổng cộng</span>
             <strong>
-              {formatCurrency(pendingVnpayOrder?.amount || totalAmount)}
+              {formatCurrency(
+                pendingVnpayOrder?.amount ||
+                  appliedDiscount?.finalAmount ||
+                  totalAmount,
+              )}
             </strong>
           </div>
         </aside>

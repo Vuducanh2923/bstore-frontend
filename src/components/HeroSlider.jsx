@@ -311,8 +311,12 @@ function BannerSlide({ banner, compact }) {
         <img
           className="hero-banner-image"
           alt={displayBanner.title}
+          decoding="async"
+          fetchPriority={compact ? "auto" : "high"}
+          height={compact ? 240 : 500}
           onError={() => setImageFailed(true)}
           src={displayBanner.image}
+          width={compact ? 520 : 1200}
         />
       </BannerLink>
     );
@@ -343,7 +347,15 @@ function BannerSlide({ banner, compact }) {
         </div>
         {displayBanner.image ? (
           <div className="hero-image">
-            <img alt="" onError={() => setImageFailed(true)} src={displayBanner.image} />
+            <img
+              alt=""
+              decoding="async"
+              fetchPriority={compact ? "auto" : "high"}
+              height={compact ? 240 : 500}
+              onError={() => setImageFailed(true)}
+              src={displayBanner.image}
+              width={compact ? 520 : 1200}
+            />
           </div>
         ) : null}
       </div>

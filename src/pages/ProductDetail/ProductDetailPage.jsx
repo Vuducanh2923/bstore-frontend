@@ -11,9 +11,11 @@ import {
   formatSalePercent,
   getProductSaleInfo,
   getProductSpecEntries,
+  isBrokenProductImageUrl,
   normalizeProduct,
   resolveMediaUrl,
 } from "../../utils/formatters";
+import { sanitizeProductDescription } from "../../utils/sanitizeHtml";
 
 const PRIORITY_SPEC_KEYS = [
   "chip",
@@ -101,7 +103,7 @@ function getProductGalleryImages(product = {}) {
     product.imageUrl,
     product.thumbnail,
     ...rawImages.map(getImageValue),
-  ].filter(Boolean);
+  ].filter((image) => image && !isBrokenProductImageUrl(image));
   const uniqueImages = Array.from(new Set(imageValues.map((image) => String(image).trim())))
     .filter(Boolean);
 
@@ -306,12 +308,25 @@ export default function ProductDetailPage() {
   const storageOptions = getVariantValues(product.variants, "storage");
   const colorOptions = getVariantValues(product.variants, "color");
   const selectedStock = Number(
-    selectedVariant.inventory?.quantity ??
+    selectedVariant.available_quantity ??
+      selectedVariant.availableQuantity ??
+      selectedVariant.inventory?.available_quantity ??
+      selectedVariant.inventory?.availableQuantity ??
+      product.availableQuantity ??
+      selectedVariant.inventory?.quantity ??
       selectedVariant.stock ??
       product.stock ??
       0,
   );
+  const hasAvailableQuantity =
+    selectedVariant.available_quantity !== undefined ||
+    selectedVariant.availableQuantity !== undefined ||
+    selectedVariant.inventory?.available_quantity !== undefined ||
+    selectedVariant.inventory?.availableQuantity !== undefined ||
+    product.availableQuantity !== null;
+  const isOutOfStock = hasAvailableQuantity && selectedStock === 0;
   const descriptionHtml = product.description || product.raw?.description || "";
+  const sanitizedDescriptionHtml = sanitizeProductDescription(descriptionHtml);
   const shortDescription =
     product.raw?.short_description ||
     product.raw?.shortDescription ||
@@ -392,6 +407,12 @@ export default function ProductDetailPage() {
             )}
           </div>
 
+          {hasAvailableQuantity ? (
+            <p className={`detail-available-stock${isOutOfStock ? " detail-available-stock--empty" : ""}`}>
+              {isOutOfStock ? "Hết hàng" : `Còn: ${selectedStock} sản phẩm`}
+            </p>
+          ) : null}
+
           <p className="detail-tax-note">Giá đã bao gồm VAT. Hàng mới, chính hãng.</p>
 
           {storageOptions.length ? (
@@ -455,8 +476,8 @@ export default function ProductDetailPage() {
           ) : null}
 
           <div className="detail-stock-row">
-            <span>{selectedStock > 0 ? "Còn hàng" : "Liên hệ tồn kho"}</span>
-            <label>
+            <span>{isOutOfStock ? "Hết hàng" : "Còn hàng"}</span>
+            {!isOutOfStock ? <label>
               <button
                 onClick={() => setQuantity((current) => Math.max(1, current - 1))}
                 type="button"
@@ -478,18 +499,26 @@ export default function ProductDetailPage() {
               >
                 +
               </button>
-            </label>
+            </label> : null}
           </div>
 
           <div className="detail-actions detail-actions--purchase">
-            <button className="primary-button" onClick={handleBuyNow} type="button">
-              Mua ngay
-              <small>Giao hàng hoặc nhận tại cửa hàng</small>
-            </button>
-            <button className="secondary-button" onClick={handleAddToCart} type="button">
-              Thêm giỏ hàng
-              <small>Đặt giữ sản phẩm</small>
-            </button>
+            {isOutOfStock ? (
+              <Link className="primary-button detail-contact-button" to="/contact">
+                Liên hệ
+              </Link>
+            ) : (
+              <>
+                <button className="primary-button" onClick={handleBuyNow} type="button">
+                  Mua ngay
+                  <small>Giao hàng hoặc nhận tại cửa hàng</small>
+                </button>
+                <button className="secondary-button" onClick={handleAddToCart} type="button">
+                  Thêm giỏ hàng
+                  <small>Đặt giữ sản phẩm</small>
+                </button>
+              </>
+            )}
           </div>
         </section>
 
@@ -551,7 +580,7 @@ export default function ProductDetailPage() {
             <p className="detail-short-description">{shortDescription}</p>
             <div
               className="detail-description-content"
-              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+              dangerouslySetInnerHTML={{ __html: sanitizedDescriptionHtml }}
             />
             {highlightSpecs.length ? (
               <div className="detail-highlight-box">

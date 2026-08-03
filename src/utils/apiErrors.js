@@ -26,16 +26,13 @@ export function getFieldError(errors = {}, field) {
 
 export function getStatusErrorMessage(error, fallback) {
   const status = Number(error?.response?.status || 0);
+  const statusFallback = status === 403
+    ? "Bạn không có quyền truy cập."
+    : status === 404
+      ? "Không tìm thấy dữ liệu."
+      : fallback;
 
-  if (status === 403) {
-    return "Bạn không có quyền truy cập.";
-  }
-
-  if (status === 404) {
-    return "Không tìm thấy dữ liệu.";
-  }
-
-  return getApiErrorMessage(error, fallback);
+  return getApiErrorMessage(error, statusFallback);
 }
 
 export function isValidationError(error) {

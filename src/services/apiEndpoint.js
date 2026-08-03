@@ -41,6 +41,7 @@ export const API_ENDPOINTS = {
     changePassword: "/profile/change-password",
   },
   customer: {
+    discountPreview: "/customer/discount-codes/preview",
     orders: "/customer/orders",
     order: (orderId) => `/customer/orders/${encodeURIComponent(orderId)}`,
     orderCancel: (orderId) =>
@@ -70,6 +71,11 @@ export const API_ENDPOINTS = {
     vnpayReturn: "/payments/vnpay/return",
   },
   admin: {
+    discountCodes: "/admin/discount-codes",
+    discountCode: (discountCodeId) =>
+      `/admin/discount-codes/${encodeURIComponent(discountCodeId)}`,
+    discountCodeDeactivate: (discountCodeId) =>
+      `/admin/discount-codes/${encodeURIComponent(discountCodeId)}/deactivate`,
     products: "/products",
     product: (productId) => `/products/${encodeURIComponent(productId)}`,
     banners: "/banners",
@@ -100,6 +106,10 @@ export const API_ENDPOINTS = {
       `/admin/orders/${encodeURIComponent(orderId)}/assign`,
     orderCancel: (orderId) =>
       `/admin/orders/${encodeURIComponent(orderId)}/cancel`,
+    orderCancelApprove: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/cancel/approve`,
+    orderCancelReject: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/cancel/reject`,
     orderRefund: (orderId) =>
       `/admin/orders/${encodeURIComponent(orderId)}/refund`,
     orderStatus: (orderId) =>

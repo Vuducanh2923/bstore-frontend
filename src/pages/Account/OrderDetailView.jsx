@@ -342,7 +342,6 @@ export default function OrderDetailView({
                           {(() => {
                             const raw = rawItems[index] || {};
                             const orderStatus = normalizeWorkflowKey(status);
-                            const policy = raw.warranty_policy || raw.product?.warranty_policy;
                             const expiry = raw.warranty_expiry_date || raw.warranty_end_date;
                             const active = raw.has_active_warranty_request ||
                               raw.active_warranty_request ||
@@ -351,7 +350,17 @@ export default function OrderDetailView({
                               );
                             let reason = "";
                             if (!["delivered", "completed"].includes(orderStatus)) reason = "Đơn hàng chưa được giao.";
-                            else if (!policy && !raw.has_warranty) reason = "Sản phẩm không có bảo hành.";
+                            else if (
+                              raw.has_warranty === false ||
+                              (
+                                raw.warranty_eligible === false &&
+                                ["no_policy", "not_supported"].includes(
+                                  raw.warranty_ineligible_reason,
+                                )
+                              )
+                            ) {
+                              reason = "Sản phẩm không có bảo hành.";
+                            }
                             else if (expiry && new Date(expiry).getTime() < Date.now()) reason = "Sản phẩm đã hết hạn bảo hành.";
                             else if (active) reason = "Đã có yêu cầu đang xử lý.";
                             const itemId = raw.id ?? raw.order_item_id ?? raw.orderItemId;

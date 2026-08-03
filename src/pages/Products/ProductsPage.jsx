@@ -10,7 +10,6 @@ import ProductCard, { ProductCardSkeleton } from "../../components/ProductCard";
 import StatusMessage from "../../components/StatusMessage";
 import { getApiErrorMessage, readCollection } from "../../services/api";
 import { productService } from "../../services/bstoreService";
-import { getProducts, getSaleProducts } from "../../services/productService";
 import {
   buildProductsPath,
   findCatalogOptionByValue,
@@ -448,7 +447,9 @@ export default function ProductsPage({ newOnly = false, saleOnly = false }) {
       }
 
       try {
-        const fetchProducts = saleOnly ? getSaleProducts : getProducts;
+        const fetchProducts = saleOnly
+          ? productService.getSaleProducts
+          : productService.getProducts;
         const payload = await fetchProducts({
           page: nextPage,
           limit: PRODUCTS_PER_PAGE,
@@ -457,7 +458,6 @@ export default function ProductsPage({ newOnly = false, saleOnly = false }) {
           search: initialSearch || undefined,
           sort: effectiveSort || undefined,
           order: newOnly ? "desc" : undefined,
-          signal: controller.signal,
         });
         const productPayload = unwrapProductPayload(payload);
         const rawList = readCollection(productPayload, ["products"]);

@@ -2,17 +2,12 @@ import { resolveMediaUrl } from "./formatters";
 import { readOrder } from "./orders";
 
 export const ORDER_STATUS_OPTIONS = [
-  { label: "Chờ xử lý", value: "pending" },
-  { label: "Đã xác nhận", value: "confirmed" },
+  { label: "Chờ xác nhận", value: "pending" },
   { label: "Đang xử lý", value: "processing" },
   { label: "Đang vận chuyển", value: "shipping" },
   { label: "Đã giao hàng", value: "delivered" },
   { label: "Hoàn tất", value: "completed" },
-  { label: "Chờ duyệt hủy", value: "pending_cancel" },
   { label: "Đã hủy", value: "cancelled" },
-  { label: "Đang hoàn tiền", value: "refunding" },
-  { label: "Đã hoàn tiền", value: "refunded" },
-  { label: "Đã trả hàng", value: "returned" },
 ];
 
 export const ORDER_TIMELINE_STEPS = [
@@ -58,25 +53,13 @@ export const REFUND_TIMELINE_STEPS = [
     aliases: ["requested", "request", "sent", "submitted", "pending"],
     dateFields: ["refund_requested_at", "refundRequestedAt", "requested_at", "requestedAt"],
     key: "requested",
-    label: "Đã gửi yêu cầu",
+    label: "Đang chờ",
   },
   {
-    aliases: ["reviewing", "review", "considering", "processing"],
-    dateFields: ["refund_reviewed_at", "refundReviewedAt", "reviewed_at", "reviewedAt"],
-    key: "reviewing",
-    label: "Đang xem xét",
-  },
-  {
-    aliases: ["approved", "accepted"],
-    dateFields: ["refund_approved_at", "refundApprovedAt", "approved_at", "approvedAt"],
-    key: "approved",
-    label: "Đã duyệt",
-  },
-  {
-    aliases: ["refunding", "transferring", "paying"],
+    aliases: ["reviewing", "review", "considering", "processing", "approved", "accepted", "refunding", "transferring", "paying"],
     dateFields: ["refunding_at", "refundingAt", "refund_processing_at", "refundProcessingAt"],
     key: "refunding",
-    label: "Đang hoàn tiền",
+    label: "Đang xử lý",
   },
   {
     aliases: ["refunded", "completed", "done"],
@@ -84,6 +67,13 @@ export const REFUND_TIMELINE_STEPS = [
     key: "refunded",
     label: "Hoàn tất",
   },
+];
+
+export const RETURN_TIMELINE_STEPS = [
+  { aliases: ["requested", "pending", "request"], key: "requested", label: "Chờ yêu cầu" },
+  { aliases: ["approved", "accepted"], key: "approved", label: "Đã duyệt" },
+  { aliases: ["received", "returned", "item_received"], key: "received", label: "Đã nhận hàng" },
+  { aliases: ["completed", "done"], key: "completed", label: "Hoàn tất" },
 ];
 
 const DEFAULT_ADMIN_CONTACT = {
@@ -414,15 +404,15 @@ function getCurrentRefundStepIndex(status) {
   const key = normalizeWorkflowKey(status);
 
   if (["refunded", "completed", "done"].includes(key)) {
-    return 4;
+    return 2;
   }
 
   if (["refunding", "transferring", "paying"].includes(key)) {
-    return 3;
+    return 1;
   }
 
   if (["approved", "accepted"].includes(key)) {
-    return 2;
+    return 1;
   }
 
   if (["reviewing", "review", "considering", "processing"].includes(key)) {
@@ -486,6 +476,45 @@ export function getRefundInfo(payload = {}) {
     ),
     status,
     timeline,
+  };
+}
+
+export function getReturnInfo(payload = {}) {
+  const order = readOrder(payload);
+  const returnRequest = readFirstObject([
+    order.return_request,
+    order.returnRequest,
+    order.return_info,
+    order.returnInfo,
+  ]);
+  const status = normalizeWorkflowKey(
+    returnRequest.status || order.return_status || order.returnStatus,
+  );
+  const rawTimeline = readFirstArray([
+    returnRequest.timeline,
+    returnRequest.history,
+    order.return_timeline,
+    order.returnTimeline,
+    order.return_history,
+    order.returnHistory,
+  ]);
+  const currentIndex = RETURN_TIMELINE_STEPS.findIndex((step) =>
+    step.aliases.includes(status),
+  );
+
+  return {
+    status,
+    timeline: RETURN_TIMELINE_STEPS.map((step, index) => {
+      const entry = findStepEntry(rawTimeline, step);
+      return {
+        key: step.key,
+        label: step.label,
+        note: displayWorkflowText(entry.note || entry.description, ""),
+        staff: getStaffInfo(entry),
+        time: readEntryTime(entry),
+        tone: Object.keys(entry).length || currentIndex >= index ? "done" : "pending",
+      };
+    }),
   };
 }
 

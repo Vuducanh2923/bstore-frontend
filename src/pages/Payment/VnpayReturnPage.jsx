@@ -318,11 +318,6 @@ export default function VnpayReturnPage() {
           (queryParams.vnp_ResponseCode === "00" &&
             queryParams.vnp_TransactionStatus === "00");
 
-        console.log("VNPAY raw response:", response);
-        console.log("VNPAY payload:", payload);
-        console.log("VNPAY data:", data);
-        console.log("VNPAY success detected:", isVnpaySuccess);
-
         if (ignored) {
           return;
         }
@@ -424,7 +419,9 @@ export default function VnpayReturnPage() {
           showToast(message, "error");
         }
       } finally {
-        setLoading(false);
+        if (!ignored) {
+          setLoading(false);
+        }
       }
     }
 

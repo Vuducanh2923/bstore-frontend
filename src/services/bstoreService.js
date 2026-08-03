@@ -1,4 +1,4 @@
-import api, { getToken, readCollection, unwrapResponse } from "./api";
+import api, { getToken, normalizePaginatedResponse, unwrapResponse } from "./api";
 import { API_ENDPOINTS } from "./apiEndpoint";
 import authApi from "./authApi";
 import orderApi from "./orderApi";
@@ -8,7 +8,6 @@ const toPayload = (request) => request.then(unwrapResponse);
 const toBody = (request) => request.then((response) => response.data);
 const isFormDataPayload = (payload) =>
   typeof FormData !== "undefined" && payload instanceof FormData;
-const ADMIN_BRANDS_PAGE_SIZE = 100;
 const SUPPRESS_GLOBAL_ERROR_CONFIG = { suppressGlobalError: true };
 
 function isEndpointUnavailable(error) {
@@ -43,140 +42,19 @@ function normalizeVnpayPaymentPayload(payload = {}) {
   };
 }
 
-function getPaginationValue(payload = {}, key, fallback = undefined) {
-  const meta = payload.meta || payload.pagination || {};
-
-  return payload[key] ?? meta[key] ?? fallback;
-}
-
-function normalizeBrandsPagination(payload = {}, fallbackPage = 1) {
-  const page = Number(
-    getPaginationValue(
-      payload,
-      "page",
-      getPaginationValue(payload, "current_page", fallbackPage),
-    ),
-  );
-  const limit = Number(
-    getPaginationValue(
-      payload,
-      "limit",
-      getPaginationValue(payload, "per_page", ADMIN_BRANDS_PAGE_SIZE),
-    ),
-  );
-  const total = Number(getPaginationValue(payload, "total", 0));
-  const totalPages = Number(
-    getPaginationValue(
-      payload,
-      "totalPages",
-      getPaginationValue(
-        payload,
-        "last_page",
-        getPaginationValue(payload, "total_pages", total > 0 ? Math.ceil(total / Math.max(limit, 1)) : 1),
-      ),
-    ),
-  );
-
-  return {
-    limit: Math.max(1, limit || ADMIN_BRANDS_PAGE_SIZE),
-    page: Math.max(1, page || fallbackPage),
-    total: Math.max(0, total || 0),
-    totalPages: Math.max(1, totalPages || 1),
-  };
-}
-
-async function getAllAdminBrands(params = {}) {
-  const requestedLimit = Number(params.limit ?? params.per_page ?? ADMIN_BRANDS_PAGE_SIZE);
-  const pageSize = Math.min(
-    ADMIN_BRANDS_PAGE_SIZE,
-    Math.max(1, requestedLimit || ADMIN_BRANDS_PAGE_SIZE),
-  );
-  const baseParams = {
-    ...params,
-    limit: pageSize,
-    per_page: pageSize,
-  };
-  const fetchAdminBrandsPage = async (page) => {
-    const response = await api.get(API_ENDPOINTS.admin.brands, {
-      params: {
-        ...baseParams,
-        page,
-      },
-    });
-
-    return response.data;
-  };
-  const fetchPublicBrands = async () => {
-    const response = await api.get(API_ENDPOINTS.brands.list);
-    const payload = response.data;
-    const brands = readCollection(payload, ["brands"]);
-
-    return {
-      success: payload?.success ?? true,
-      message: payload?.message ?? "Success",
-      data: brands,
-      brands,
-      pagination: {
-        page: 1,
-        limit: brands.length || pageSize,
-        total: brands.length,
-        totalPages: 1,
-      },
-    };
-  };
-
-  try {
-    const firstPayload = await fetchAdminBrandsPage(1);
-    const firstPageBrands = readCollection(firstPayload, ["brands"]);
-    const pagination = normalizeBrandsPagination(firstPayload, 1);
-    const totalPages = pagination.totalPages;
-
-    if (totalPages <= 1) {
-      return firstPayload;
-    }
-
-    const remainingPayloads = await Promise.all(
-      Array.from({ length: totalPages - 1 }, (_, index) =>
-        fetchAdminBrandsPage(index + 2),
-      ),
-    );
-    const brands = [
-      ...firstPageBrands,
-      ...remainingPayloads.flatMap((payload) =>
-        readCollection(payload, ["brands"]),
-      ),
-    ];
-
-    return {
-      ...firstPayload,
-      data: brands,
-      brands,
-      pagination: {
-        ...firstPayload.pagination,
-        ...pagination,
-        total: pagination.total || brands.length,
-      },
-    };
-  } catch (error) {
-    if (![404, 405].includes(Number(error?.response?.status))) {
-      throw error;
-    }
-
-    return fetchPublicBrands();
-  }
-}
-
 export const authService = authApi;
 
 export const productService = {
   getProducts: (params = {}) => cachedRequest(
     createRequestKey("products", params),
-    () => toPayload(api.get(API_ENDPOINTS.products.list, { params })),
+    () => api.get(API_ENDPOINTS.products.list, { params })
+      .then((response) => normalizePaginatedResponse(response, ["products"], params)),
     { ttl: 60_000 },
   ),
   getSaleProducts: (params = {}) => cachedRequest(
     createRequestKey("sale-products", params),
-    () => toPayload(api.get(API_ENDPOINTS.products.sale, { params })),
+    () => api.get(API_ENDPOINTS.products.sale, { params })
+      .then((response) => normalizePaginatedResponse(response, ["products"], params)),
     { ttl: 60_000 },
   ),
   getProduct: (slug) => cachedRequest(
@@ -184,19 +62,25 @@ export const productService = {
     () => toPayload(api.get(API_ENDPOINTS.products.detail(slug))),
     { ttl: 60_000 },
   ),
-  getCategories: () => cachedRequest(
-    "catalog:categories",
-    () => toPayload(api.get(API_ENDPOINTS.categories.list)),
+  getCategories: (params = {}) => cachedRequest(
+    createRequestKey("catalog:categories", params),
+    () => api.get(API_ENDPOINTS.categories.list, { params })
+      .then((response) => normalizePaginatedResponse(response, ["categories"], params)),
   ),
-  getBrands: () => cachedRequest(
-    "catalog:brands",
-    () => toPayload(api.get(API_ENDPOINTS.brands.list)),
+  getBrands: (params = {}) => cachedRequest(
+    createRequestKey("catalog:brands", params),
+    () => api.get(API_ENDPOINTS.brands.list, { params })
+      .then((response) => normalizePaginatedResponse(response, ["brands"], params)),
   ),
 };
 
 export const bannerService = {
   getBanners: () => toPayload(api.get(API_ENDPOINTS.banners.list)),
-  getHomeBanners: () => toPayload(api.get(API_ENDPOINTS.home.banners)),
+  getHomeBanners: () => cachedRequest(
+    "banners:home",
+    () => toPayload(api.get(API_ENDPOINTS.home.banners)),
+    { ttl: 5 * 60_000 },
+  ),
   getBanner: (bannerId) =>
     toPayload(api.get(API_ENDPOINTS.banners.detail(bannerId))),
 };
@@ -228,7 +112,11 @@ export const profileService = {
 };
 
 export const customerOrderService = {
-  getOrders: () => toPayload(api.get(API_ENDPOINTS.customer.orders)),
+  getOrders: (params = {}, config = {}) =>
+    api.get(API_ENDPOINTS.customer.orders, {
+      ...config,
+      params,
+    }).then((response) => response.data),
   getOrder: (orderId, config) =>
     toPayload(api.get(API_ENDPOINTS.customer.order(orderId), config)),
   cancelOrder: (orderId, payload = {}) =>
@@ -297,14 +185,18 @@ export const adminService = {
     ),
   deleteBanner: (bannerId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.banner(bannerId))),
-  getCategories: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.categories, config)),
+  getCategories: (params = {}, config = {}) =>
+    api.get(API_ENDPOINTS.admin.categories, { ...config, params })
+      .then((response) => normalizePaginatedResponse(response, ["categories"], params)),
   createCategory: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.categories, payload)),
   updateCategory: (categoryId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.category(categoryId), payload)),
   deleteCategory: (categoryId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.category(categoryId))),
-  getBrands: (params) => getAllAdminBrands(params),
+  getBrands: (params = {}, config = {}) =>
+    api.get(API_ENDPOINTS.admin.brands, { ...config, params })
+      .then((response) => normalizePaginatedResponse(response, ["brands"], params)),
   getRoles: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.roles, config)),
   getUsers: () => toPayload(api.get(API_ENDPOINTS.admin.users)),
   updateUser: (userId, payload) =>
@@ -336,12 +228,16 @@ export const adminService = {
     toPayload(api.put(API_ENDPOINTS.admin.product(productId), payload)),
   deleteProduct: (productId) =>
     toPayload(api.delete(API_ENDPOINTS.admin.product(productId))),
-  getInventory: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.inventory, config)),
+  getInventory: (params = {}, config = {}) =>
+    api.get(API_ENDPOINTS.admin.inventory, { ...config, params })
+      .then((response) => normalizePaginatedResponse(response, ["inventories", "inventory"], params)),
   createInventory: (payload) =>
     toPayload(api.post(API_ENDPOINTS.admin.inventory, payload)),
   updateInventory: (inventoryId, payload) =>
     toPayload(api.put(API_ENDPOINTS.admin.inventoryItem(inventoryId), payload)),
-  getOrders: (config = {}) => toPayload(api.get(API_ENDPOINTS.admin.orders, config)),
+  getOrders: (params = {}, config = {}) =>
+    api.get(API_ENDPOINTS.admin.orders, { ...config, params })
+      .then((response) => normalizePaginatedResponse(response, ["orders"], params)),
   getOrder: (orderId, config) =>
     toPayload(api.get(API_ENDPOINTS.admin.order(orderId), config)),
   assignOrder: (orderId, payload = {}) =>
@@ -367,26 +263,22 @@ export const adminService = {
         ),
     ),
   cancelOrder: (orderId, payload = {}) =>
-    withEndpointFallback(
-      () =>
-        toPayload(
-          api.patch(
-            API_ENDPOINTS.admin.orderCancel(orderId),
-            payload,
-            SUPPRESS_GLOBAL_ERROR_CONFIG,
-          ),
-        ),
-      () =>
-        toPayload(
-          api.patch(
-            API_ENDPOINTS.admin.orderStatus(orderId),
-            {
-              ...payload,
-              status: "cancelled",
-            },
-            SUPPRESS_GLOBAL_ERROR_CONFIG,
-          ),
-        ),
+    toPayload(
+      api.put(
+        API_ENDPOINTS.admin.orderCancelApprove(orderId),
+        { note: payload.note || payload.reason || payload.cancel_reason || "" },
+        SUPPRESS_GLOBAL_ERROR_CONFIG,
+      ),
+    ),
+  decideCancelRequest: (orderId, status, payload = {}) =>
+    toPayload(
+      api.put(
+        status === "approved"
+          ? API_ENDPOINTS.admin.orderCancelApprove(orderId)
+          : API_ENDPOINTS.admin.orderCancelReject(orderId),
+        payload,
+        SUPPRESS_GLOBAL_ERROR_CONFIG,
+      ),
     ),
   updateRefundStatus: (orderId, payload = {}) =>
     withEndpointFallback(
@@ -412,6 +304,14 @@ export const adminService = {
     ),
   updateOrderStatus: (orderId, payload) =>
     toPayload(api.patch(API_ENDPOINTS.admin.orderStatus(orderId), payload)),
+  updatePaymentStatus: (orderId, paymentStatus, orderStatus) =>
+    toPayload(
+      api.patch(
+        API_ENDPOINTS.admin.orderStatus(orderId),
+        { payment_status: paymentStatus, status: orderStatus },
+        SUPPRESS_GLOBAL_ERROR_CONFIG,
+      ),
+    ),
   updateOrder: (orderId, payload) =>
     toPayload(api.patch(API_ENDPOINTS.admin.orderStatus(orderId), payload)),
 };

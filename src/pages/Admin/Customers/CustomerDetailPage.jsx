@@ -45,16 +45,22 @@ function formatAddress(address) {
 
 function normalizeCustomer(payload = {}) {
   const customer = payload.customer || payload.user || payload.data || payload || {};
-  const addresses = Array.isArray(customer.user_addresses)
-    ? customer.user_addresses
-    : Array.isArray(customer.addresses)
-      ? customer.addresses
-      : readCollection(customer, ["user_addresses", "addresses"]);
-  const orders = Array.isArray(customer.orders)
-    ? customer.orders
-    : Array.isArray(customer.order_history)
-      ? customer.order_history
-      : readCollection(customer, ["orders"]);
+  const addresses = Array.isArray(payload.addresses)
+    ? payload.addresses
+    : Array.isArray(customer.user_addresses)
+      ? customer.user_addresses
+      : Array.isArray(customer.addresses)
+        ? customer.addresses
+        : readCollection(customer, ["user_addresses", "addresses"]);
+  const orders = Array.isArray(payload.orders)
+    ? payload.orders
+    : Array.isArray(payload.order_history)
+      ? payload.order_history
+      : Array.isArray(customer.orders)
+        ? customer.orders
+        : Array.isArray(customer.order_history)
+          ? customer.order_history
+          : readCollection(payload, ["orders", "order_history"]);
 
   return {
     addresses,
@@ -73,6 +79,7 @@ function normalizeCustomer(payload = {}) {
     email: customer.email || "",
     fullName: customer.full_name || customer.fullName || customer.name || "Khách hàng",
     gender: customer.gender || "",
+    id: customer.id ?? customer.user_id ?? customer.userId,
     orders,
     phone: customer.phone || "",
     status: String(customer.status || "active").toLowerCase(),

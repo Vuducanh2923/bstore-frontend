@@ -154,6 +154,13 @@ export function resolveMediaUrl(value) {
     return trimmedValue;
   }
 
+  if (
+    trimmedValue.startsWith("/product-images/") ||
+    trimmedValue.startsWith("/hero-")
+  ) {
+    return trimmedValue;
+  }
+
   const apiOrigin = getApiOrigin();
   const imagePath = trimmedValue.replace(/^\/+/, "");
 
@@ -162,6 +169,19 @@ export function resolveMediaUrl(value) {
   }
 
   return `${apiOrigin}/storage/${imagePath}`;
+}
+
+export function optimizeCloudinaryImage(value, { width = 560, height = 488 } = {}) {
+  const url = resolveMediaUrl(value);
+
+  if (!/res\.cloudinary\.com\/[^/]+\/image\/upload\//i.test(url)) {
+    return url;
+  }
+
+  return url.replace(
+    /\/image\/upload\//i,
+    `/image/upload/f_auto,q_auto,c_fill,w_${width},h_${height}/`,
+  );
 }
 
 function directMediaUrl(value) {
@@ -376,6 +396,54 @@ export function getProductSpecEntries(product = {}) {
     });
 }
 
+const BROKEN_LOCAL_PRODUCT_IMAGE =
+  /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/storage\/products\//i;
+const GENERATED_PRODUCT_SUFFIX =
+  /\s+(?:special edition|new 2026|gaming|business|lite|plus|creator|pro|max|se)\s+\d+$/i;
+const FIXED_NETWORK_PRODUCT_IMAGES = {
+  "dell ultrasharp u2723qe":
+    "https://m.media-amazon.com/images/I/81tJzhSEJQL._AC_SL1500_.jpg",
+  "sony wh-1000xm5":
+    "https://m.media-amazon.com/images/I/51aXvjzcukL._AC_SL1500_.jpg",
+};
+
+export function isBrokenProductImageUrl(value) {
+  return BROKEN_LOCAL_PRODUCT_IMAGE.test(String(value || "").trim());
+}
+
+function getProductImageSearchName(product = {}) {
+  return String(
+    product.name || product.productName || product.title || product.slug || "sản phẩm công nghệ",
+  )
+    .replace(GENERATED_PRODUCT_SUFFIX, "")
+    .trim();
+}
+
+function getNetworkProductImageUrl(product = {}) {
+  const searchName = getProductImageSearchName(product);
+  const fixedImage = FIXED_NETWORK_PRODUCT_IMAGES[searchName.toLowerCase()];
+
+  if (fixedImage) {
+    return fixedImage;
+  }
+
+  const query = `${searchName} official product`;
+
+  return `https://tse2.mm.bing.net/th?q=${encodeURIComponent(query)}&w=600&h=600&c=7&rs=1&p=0`;
+}
+
+function selectProductImage(product, imageCandidate) {
+  if (
+    typeof imageCandidate === "string" &&
+    imageCandidate.trim() &&
+    !isBrokenProductImageUrl(imageCandidate)
+  ) {
+    return imageCandidate.trim();
+  }
+
+  return getNetworkProductImageUrl(product);
+}
+
 export function normalizeProduct(product = {}) {
   const thumbnail =
     product.images?.find?.((image) => image.is_thumbnail) || product.images?.[0];
@@ -391,7 +459,16 @@ export function normalizeProduct(product = {}) {
     variants[0] ||
     {};
   const inventory = variant.inventory || product.inventory || {};
-  const imageValue =
+  const availableQuantity =
+    variant.available_quantity ??
+    variant.availableQuantity ??
+    inventory.available_quantity ??
+    inventory.availableQuantity ??
+    product.available_quantity ??
+    product.availableQuantity ??
+    product.inventory?.available_quantity ??
+    product.inventory?.availableQuantity;
+  const imageCandidate =
     product.full_image_url ||
     product.fullImageUrl ||
     product.imageUrl ||
@@ -404,6 +481,7 @@ export function normalizeProduct(product = {}) {
     thumbnail?.image_url ||
     thumbnail?.url ||
     thumbnail;
+  const imageValue = selectProductImage(product, imageCandidate);
   const basePrice = Number(variant.price ?? product.price ?? product.salePrice ?? 0);
   const saleInfo = getProductSaleInfo({
     ...product,
@@ -469,6 +547,10 @@ export function normalizeProduct(product = {}) {
         product.inventory?.quantity ??
         0,
     ),
+    availableQuantity:
+      availableQuantity === undefined || availableQuantity === null
+        ? null
+        : Number(availableQuantity),
     imageUrl: directMediaUrl(typeof imageValue === "string" ? imageValue : ""),
     thumbnail: directMediaUrl(typeof imageValue === "string" ? imageValue : ""),
     specifications: normalizeSpecifications(product.specifications),
@@ -480,7 +562,7 @@ export function normalizeProduct(product = {}) {
 }
 
 export function normalizeProductSummary(product = {}) {
-  const thumbnail =
+  const thumbnailCandidate =
     product.thumbnail ||
     product.thumbnail_url ||
     product.thumbnailUrl ||
@@ -505,6 +587,7 @@ export function normalizeProductSummary(product = {}) {
     product.image_url ||
     product.image ||
     product.cover;
+  const thumbnail = selectProductImage(product, thumbnailCandidate);
   const price =
     product.price ??
     product.originalPrice ??
@@ -532,6 +615,11 @@ export function normalizeProductSummary(product = {}) {
     price,
     sale_price: salePrice,
   });
+  const availableQuantity =
+    product.available_quantity ??
+    product.availableQuantity ??
+    product.inventory?.available_quantity ??
+    product.inventory?.availableQuantity;
 
   return {
     id: product.id ?? product.productId ?? product.product_id ?? product._id,
@@ -550,6 +638,10 @@ export function normalizeProductSummary(product = {}) {
     category_slug:
       product.category_slug ?? product.categorySlug ?? product.category?.slug ?? "",
     rating: rating === null || rating === "" ? null : Number(rating),
+    available_quantity:
+      availableQuantity === undefined || availableQuantity === null
+        ? null
+        : Number(availableQuantity),
   };
 }
 

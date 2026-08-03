@@ -4,6 +4,7 @@ import PaymentStatusBadge from "../../components/PaymentStatusBadge";
 import StatusBadge from "../../components/StatusBadge";
 import StatusMessage from "../../components/StatusMessage";
 import { useToast } from "../../context/ToastContext";
+import { useAuth } from "../../context/AuthContext";
 import { readCollection } from "../../services/api";
 import { customerOrderService } from "../../services/bstoreService";
 import { getStatusErrorMessage } from "../../utils/apiErrors";
@@ -12,6 +13,7 @@ import { displayWorkflowText } from "../../utils/orderWorkflow";
 import OrderDetailModal from "./OrderDetailModal";
 
 const EMPTY_ORDERS = [];
+const ORDER_HISTORY_PAGE_SIZE = 100;
 
 function displayText(value, fallback = "") {
   return displayWorkflowText(value, fallback);
@@ -65,6 +67,24 @@ function readOrders(payload = {}) {
   }
 
   return [];
+}
+
+async function loadAllCustomerOrders() {
+  const orders = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const payload = await customerOrderService.getOrders({
+      page,
+      per_page: ORDER_HISTORY_PAGE_SIZE,
+    });
+    orders.push(...readOrders(payload));
+    hasMore = Boolean(payload?.pagination?.hasMore);
+    page += 1;
+  }
+
+  return orders;
 }
 
 function formatDate(value) {
@@ -140,6 +160,7 @@ function TableSkeleton() {
 }
 
 export default function OrderHistory() {
+  const { user } = useAuth();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [detailState, setDetailState] = useState({
@@ -150,10 +171,10 @@ export default function OrderHistory() {
 
   const ordersQuery = useQuery({
     queryFn: async () => {
-      const payload = await customerOrderService.getOrders();
-      return readOrders(payload).map(normalizeOrder);
+      const orders = await loadAllCustomerOrders();
+      return orders.map(normalizeOrder);
     },
-    queryKey: ["customer", "orders"],
+    queryKey: ["customer", "orders", user?.id],
   });
 
   const detailQuery = useQuery({

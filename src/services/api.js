@@ -145,15 +145,18 @@ function isPublicRequest(config = {}) {
   return ["get", "head", "options"].includes(method) && matches(config, PUBLIC_PATHS);
 }
 
-function dispatchHttpError(status) {
+function dispatchHttpError(status, detail = {}) {
   const messages = {
-    401: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
-    403: "Bạn không có quyền thực hiện thao tác này.",
+    401: "Phiên đăng nhập đã hết hạn.",
+    403: "Bạn không có quyền truy cập.",
     404: "Không tìm thấy dữ liệu yêu cầu.",
+    503: "Hệ thống xác thực đang tạm thời không khả dụng.",
   };
   if (messages[status] || status >= 500) dispatchApiEvent(API_ERROR_EVENT, {
     message: messages[status] || "Máy chủ đang gặp lỗi. Vui lòng thử lại sau.",
     type: status >= 500 ? "error" : "warning",
+    dedupeKey: `http-${status}`,
+    ...detail,
   });
 }
 
@@ -201,6 +204,9 @@ api.interceptors.response.use((response) => {
         const refreshStatus = Number(refreshError?.response?.status || 0);
         const invalidResponse = refreshError?.message === "INVALID_REFRESH_RESPONSE";
         if (![400, 401, 403, 422].includes(refreshStatus) && !invalidResponse) {
+          if (refreshStatus === 503 && !config.suppressGlobalError) {
+            dispatchHttpError(503, { retry: () => api(config) });
+          }
           return Promise.reject(refreshError);
         }
       }
@@ -214,7 +220,9 @@ api.interceptors.response.use((response) => {
   } else if (status === 403 && !verificationError) {
     dispatchApiEvent(FORBIDDEN_EVENT, { reason: "forbidden", path });
   }
-  if (status && status !== 401 && !verificationError && !config.suppressGlobalError) dispatchHttpError(status);
+  if (status && status !== 401 && !verificationError && !config.suppressGlobalError) {
+    dispatchHttpError(status, status === 503 ? { retry: () => api(config) } : {});
+  }
   return Promise.reject(error);
 });
 
@@ -227,12 +235,54 @@ export function readCollection(payload, keys = []) {
   }
   return [];
 }
-export function getApiErrorMessage(error, fallback = "Không thể kết nối API.") {
-  if (!error?.response) return error?.code === "ERR_CANCELED" ? "" : fallback;
+export function normalizePaginatedResponse(responseOrPayload, keys = [], defaults = {}) {
+  const responseBody = responseOrPayload?.data !== undefined &&
+    (responseOrPayload?.status !== undefined || responseOrPayload?.headers !== undefined)
+    ? responseOrPayload.data
+    : responseOrPayload;
+  const payload = responseBody?.data && !Array.isArray(responseBody.data)
+    ? responseBody.data
+    : responseBody;
+  const data = readCollection(payload, keys);
+  const meta = payload?.pagination || payload?.meta || responseBody?.pagination || responseBody?.meta || {};
+  const page = Number(meta.current_page ?? meta.currentPage ?? meta.page ?? payload?.current_page ?? payload?.page ?? defaults.page ?? 1);
+  const limit = Number(meta.per_page ?? meta.perPage ?? meta.limit ?? payload?.per_page ?? payload?.limit ?? defaults.limit ?? (data.length || 1));
+  const total = Number(meta.total ?? payload?.total ?? data.length);
+  const totalPages = Number(meta.last_page ?? meta.lastPage ?? meta.total_pages ?? meta.totalPages ?? payload?.last_page ?? payload?.totalPages ?? (Math.ceil(total / Math.max(limit, 1)) || 1));
+
+  return {
+    data,
+    pagination: {
+      page: Math.max(1, page || 1),
+      limit: Math.max(1, limit || 1),
+      total: Math.max(0, total || 0),
+      totalPages: Math.max(1, totalPages || 1),
+    },
+  };
+}
+function firstErrorMessage(errors) {
+  if (!errors) return "";
+  if (typeof errors === "string") return errors;
+  if (Array.isArray(errors)) {
+    return errors.map(firstErrorMessage).find(Boolean) || "";
+  }
+  if (typeof errors === "object") {
+    return Object.values(errors).map(firstErrorMessage).find(Boolean) || "";
+  }
+  return String(errors);
+}
+
+export function getApiErrorMessage(error, fallback = "Đã xảy ra lỗi.") {
+  if (!error?.response) {
+    if (error?.code === "ERR_CANCELED") return "";
+    if (error?.code === "ERR_NETWORK" || /network error/i.test(error?.message || "")) {
+      return "Không thể kết nối tới máy chủ.";
+    }
+    return fallback;
+  }
   const data = error.response.data;
   if (typeof data === "string") return data;
-  const validation = data?.errors ? Object.values(data.errors).flat().filter(Boolean) : [];
-  return data?.message || validation[0] || data?.error || error?.message || fallback;
+  return data?.message || firstErrorMessage(data?.errors) || data?.error || fallback;
 }
 
 export default api;

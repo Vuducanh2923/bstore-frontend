@@ -1,0 +1,11 @@
+{
+  "scan_interval_ms": 300,
+  "confidence": 0.82,
+  "random_delay_min_ms": 200,
+  "random_delay_max_ms": 600,
+  "move_duration_min_s": 0.15,
+  "move_duration_max_s": 0.45,
+  "click_cooldown_ms": 900,
+  "monitor": 0,
+  "template_scales": [0.8, 1.0, 1.2, 1.25, 1.5]
+}

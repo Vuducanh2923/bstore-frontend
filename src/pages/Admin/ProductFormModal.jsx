@@ -618,6 +618,17 @@ export default function ProductFormModal({
                 )}
               </div>
 
+              <label className="product-image-url-field">
+                <span>Đường dẫn hoặc URL hình ảnh</span>
+                <input
+                  name="imageUrl"
+                  onChange={onChange}
+                  placeholder="https://... hoặc uploads/products/..."
+                  type="text"
+                  value={productForm.imageUrl}
+                />
+              </label>
+
               <div className="product-image-actions">
                 <label className="product-upload-button">
                   <input
@@ -632,7 +643,7 @@ export default function ProductFormModal({
                   Xóa
                 </button>
               </div>
-              <p>Định dạng JPG, PNG, WEBP. Tối đa 5MB.</p>
+              <p>Có thể nhập đường dẫn ảnh hoặc upload JPG, PNG, WEBP tối đa 5MB.</p>
             </section>
 
             <section className="product-form-panel product-album-panel">

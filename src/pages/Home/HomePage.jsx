@@ -4,11 +4,7 @@ import HeroSlider from "../../components/HeroSlider";
 import ProductCard, { ProductCardSkeleton } from "../../components/ProductCard";
 import StatusMessage from "../../components/StatusMessage";
 import { getApiErrorMessage, readCollection } from "../../services/api";
-import {
-  getCategories,
-  getProducts,
-  getSaleProducts,
-} from "../../services/productService";
+import { productService } from "../../services/bstoreService";
 import { buildProductsPath } from "../../utils/catalogLinks";
 import {
   normalizeProductSummary,
@@ -18,7 +14,7 @@ import {
 const HOME_FEATURED_PRODUCTS_LIMIT = 10;
 const HOME_SALE_CATEGORY_LIMIT = 10;
 const HOME_SALE_PRODUCTS_PER_CATEGORY = 10;
-const HOME_SALE_PRODUCTS_LIMIT = 30;
+const HOME_SALE_PRODUCTS_LIMIT = 10;
 
 const INITIAL_SECTION_STATUS = {
   products: "idle",
@@ -228,10 +224,9 @@ export default function HomePage() {
       setSectionError("products", "");
 
       try {
-        const payload = await getProducts({
+        const payload = await productService.getProducts({
           limit: HOME_FEATURED_PRODUCTS_LIMIT,
           page: 1,
-          signal: controller.signal,
         });
         const list = normalizeProductList(payload).slice(
           0,
@@ -262,14 +257,12 @@ export default function HomePage() {
 
       try {
         const [categoryPayload, salePayload] = await Promise.all([
-          getCategories({
+          productService.getCategories({
             limit: HOME_SALE_CATEGORY_LIMIT,
-            signal: controller.signal,
           }),
-          getSaleProducts({
+          productService.getSaleProducts({
             limit: HOME_SALE_PRODUCTS_LIMIT,
             page: 1,
-            signal: controller.signal,
           }),
         ]);
         const categoryData = unwrapDataPayload(categoryPayload);

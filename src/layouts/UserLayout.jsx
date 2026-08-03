@@ -32,7 +32,9 @@ export default function UserLayout() {
           <div>
             <strong>BStore</strong>
             <Link to="/news">Tin công nghệ</Link>
-            <Link to="/contact">Liên hệ</Link>
+            <a href="https://www.facebook.com/BstoreLVTN" rel="noreferrer" target="_blank">
+              Liên hệ
+            </a>
             <Link to="/terms-of-use">Điều khoản</Link>
           </div>
         </div>

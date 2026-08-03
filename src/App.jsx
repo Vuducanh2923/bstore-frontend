@@ -17,23 +17,23 @@ import { ToastProvider } from "./context/ToastContext";
 import { FORBIDDEN_EVENT, UNAUTHORIZED_EVENT } from "./services/api";
 import AdminLayout from "./layouts/AdminLayout";
 import UserLayout from "./layouts/UserLayout";
-import AccountPage from "./pages/Account/AccountPage";
-import OrderDetailPage from "./pages/Account/OrderDetailPage";
-import ForgotPasswordPage from "./pages/Auth/ForgotPasswordPage";
-import LoginPage from "./pages/Auth/LoginPage";
-import RegisterPage from "./pages/Auth/RegisterPage";
-import VerifyEmailPage from "./pages/Auth/VerifyEmailPage";
-import CartPage from "./pages/Cart/CartPage";
-import CheckoutPage from "./pages/Checkout/CheckoutPage";
-import ContactPage from "./pages/Contact/ContactPage";
-import HomePage from "./pages/Home/HomePage";
-import NewsPage from "./pages/News/NewsPage";
-import VnpayReturnPage from "./pages/Payment/VnpayReturnPage";
-import PolicyPage from "./pages/Policy/PolicyPage";
-import ProductDetailPage from "./pages/ProductDetail/ProductDetailPage";
-import ProductsPage from "./pages/Products/ProductsPage";
 import { USER_ROLES } from "./utils/formatters";
 
+const AccountPage = lazy(() => import("./pages/Account/AccountPage"));
+const OrderDetailPage = lazy(() => import("./pages/Account/OrderDetailPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/Auth/ForgotPasswordPage"));
+const LoginPage = lazy(() => import("./pages/Auth/LoginPage"));
+const RegisterPage = lazy(() => import("./pages/Auth/RegisterPage"));
+const VerifyEmailPage = lazy(() => import("./pages/Auth/VerifyEmailPage"));
+const CartPage = lazy(() => import("./pages/Cart/CartPage"));
+const CheckoutPage = lazy(() => import("./pages/Checkout/CheckoutPage"));
+const ContactPage = lazy(() => import("./pages/Contact/ContactPage"));
+const HomePage = lazy(() => import("./pages/Home/HomePage"));
+const NewsPage = lazy(() => import("./pages/News/NewsPage"));
+const VnpayReturnPage = lazy(() => import("./pages/Payment/VnpayReturnPage"));
+const PolicyPage = lazy(() => import("./pages/Policy/PolicyPage"));
+const ProductDetailPage = lazy(() => import("./pages/ProductDetail/ProductDetailPage"));
+const ProductsPage = lazy(() => import("./pages/Products/ProductsPage"));
 const AdminDashboardPage = lazy(() => import("./pages/Admin/AdminDashboardPage"));
 const BrandPage = lazy(() => import("./pages/Admin/Brands/BrandPage"));
 const CustomerDetailPage = lazy(() => import("./pages/Admin/Customers/CustomerDetailPage"));
@@ -45,6 +45,9 @@ const WarrantyRequestDetailPage = lazy(() => import("./pages/Account/WarrantyReq
 const CreateWarrantyRequestPage = lazy(() => import("./pages/Account/CreateWarrantyRequestPage"));
 const WarrantyManagementPage = lazy(() => import("./pages/Admin/Warranty/WarrantyManagementPage"));
 const WarrantyDetailPage = lazy(() => import("./pages/Admin/Warranty/WarrantyDetailPage"));
+const DiscountCodeListPage = lazy(() => import("./pages/Admin/DiscountCodes/DiscountCodeListPage"));
+const CreateDiscountCodePage = lazy(() => import("./pages/Admin/DiscountCodes/CreateDiscountCodePage"));
+const DiscountCodeDetailPage = lazy(() => import("./pages/Admin/DiscountCodes/DiscountCodeDetailPage"));
 
 function RouteFallback() {
   return <main className="page-loading" aria-busy="true">Äang táº£i...</main>;
@@ -52,9 +55,16 @@ function RouteFallback() {
 
 const queryClient = new QueryClient({
   defaultOptions: {
+    mutations: {
+      retry: false,
+    },
     queries: {
+      gcTime: 30 * 60_000,
       refetchOnWindowFocus: false,
-      retry: 1,
+      retry: (failureCount, error) => {
+        const status = Number(error?.response?.status || 0);
+        return failureCount < 1 && ![401, 403, 503].includes(status);
+      },
       staleTime: 5 * 60_000,
     },
   },
@@ -89,9 +99,8 @@ function ApiNavigationEvents() {
       }
     };
     const handleForbidden = () => {
-      if (location.pathname !== "/403") {
-        navigate("/403", { replace: true });
-      }
+      const destination = location.pathname.startsWith("/admin") ? "/" : "/403";
+      if (location.pathname !== destination) navigate(destination, { replace: true });
     };
 
     window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
@@ -206,6 +215,9 @@ function App() {
                 <Route path="orders" element={<OrderListPage />} />
                 <Route path="warranty-requests" element={<WarrantyManagementPage />} />
                 <Route path="warranty-requests/:id" element={<WarrantyDetailPage />} />
+                <Route path="discount-codes" element={<DiscountCodeListPage />} />
+                <Route path="discount-codes/create" element={<CreateDiscountCodePage />} />
+                <Route path="discount-codes/:id" element={<DiscountCodeDetailPage />} />
                 <Route
                   path="staff"
                   element={

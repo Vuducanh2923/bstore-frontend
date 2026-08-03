@@ -181,7 +181,7 @@ export default function StaffListPage() {
         await adminService.createStaff(payload);
       }
 
-      showToast(isEditing ? "Đã cập nhật staff." : "Đã thêm staff mới.", "success");
+      showToast(isEditing ? "Đã cập nhật nhân viên." : "Đã thêm nhân viên mới.", "success");
       resetModal();
       setRefreshKey((current) => current + 1);
     } catch (error) {
@@ -204,7 +204,7 @@ export default function StaffListPage() {
     try {
       await adminService.updateStaffStatus(staffMember.id, { status: nextStatus });
       showToast(
-        nextStatus === "active" ? "Đã mở khóa staff." : "Đã khóa staff.",
+        nextStatus === "active" ? "Đã mở khóa nhân viên." : "Đã khóa nhân viên.",
         "success",
       );
       setRefreshKey((current) => current + 1);

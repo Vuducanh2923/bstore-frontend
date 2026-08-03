@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
+import { useToast } from "../context/ToastContext";
 import { readCollection } from "../services/api";
 import { productService } from "../services/bstoreService";
 import {
@@ -281,6 +282,7 @@ function AccountAvatar({ user }) {
 
 export default function Header() {
   const { isAuthenticated, logout, user } = useAuth();
+  const { showToast } = useToast();
   const currentRole = getRole(user);
   const backOfficeHref = [USER_ROLES.ADMIN, USER_ROLES.STAFF].includes(currentRole) ? "/admin" : "";
   const { totalQuantity } = useCart();
@@ -298,6 +300,15 @@ export default function Header() {
   const locationKey = `${location.pathname}?${location.search}`;
   const mobileOpen = mobileMenu.open && mobileMenu.locationKey === locationKey;
   const trimmedKeyword = keyword.trim();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // The local session is still cleared by AuthContext.
+    }
+    showToast("Đã đăng xuất.", "success");
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -635,7 +646,7 @@ export default function Header() {
                     Admin
                   </Link>
                 ) : null}
-                <button onClick={logout} type="button">
+                <button onClick={handleLogout} type="button">
                   Đăng xuất
                 </button>
               </div>

@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { getRole, USER_ROLES } from "../utils/formatters";
 
 const navItems = [
@@ -10,6 +11,7 @@ const navItems = [
   { icon: "T", label: "Brands", match: "/admin/brands", to: "/admin/brands" },
   { icon: "O", label: "Orders", match: "/admin/orders", to: "/admin/orders" },
   { icon: "W", label: "Warranty", match: "/admin/warranty-requests", to: "/admin/warranty-requests" },
+  { icon: "%", label: "Discount Codes", match: "/admin/discount-codes", to: "/admin/discount-codes" },
   { icon: "I", label: "Inventory", match: "/admin/inventory", to: "/admin/inventory" },
   { icon: "G", label: "Settings", match: "/admin/settings", to: "/admin/settings" },
 ];
@@ -33,6 +35,7 @@ const userNavItems = [
 
 export default function AdminLayout() {
   const { logout, user } = useAuth();
+  const { showToast } = useToast();
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const activeTab = searchParams.get("tab") || "dashboard";
@@ -55,6 +58,15 @@ export default function AdminLayout() {
     weekday: "long",
     year: "numeric",
   }).format(new Date());
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // The local session is still cleared by AuthContext.
+    }
+    showToast("Đã đăng xuất.", "success");
+  };
 
   return (
     <div className="admin-shell">
@@ -96,7 +108,7 @@ export default function AdminLayout() {
             <strong>{adminName}</strong>
             <span>{roleLabel}</span>
           </div>
-          <button onClick={logout} type="button">
+          <button onClick={handleLogout} type="button">
             Log out
           </button>
         </div>

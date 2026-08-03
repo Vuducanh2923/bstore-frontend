@@ -157,15 +157,29 @@ const emptyTabSearch = {
   customers: "",
 };
 
-const chartBars = [
-  { day: "Mon", value: 46 },
-  { day: "Tue", value: 70 },
-  { day: "Wed", value: 58 },
-  { day: "Thu", value: 92 },
-  { day: "Fri", value: 100, active: true },
-  { day: "Sat", value: 76 },
-  { day: "Sun", value: 64 },
+const REVENUE_RANGES = [
+  { label: "7 ngày qua", value: 7 },
+  { label: "30 ngày qua", value: 30 },
+  { label: "90 ngày qua", value: 90 },
 ];
+
+function getOrderCreatedAt(order = {}) {
+  return (
+    order.created_at ||
+    order.createdAt ||
+    order.order_date ||
+    order.orderDate ||
+    order.placed_at ||
+    order.placedAt ||
+    ""
+  );
+}
+
+function isRevenueOrder(order = {}) {
+  return !["cancelled", "canceled", "refunded", "failed"].includes(
+    String(order.status || "").toLowerCase(),
+  );
+}
 
 function normalizeOrder(order = {}) {
   return {
@@ -179,6 +193,7 @@ function normalizeOrder(order = {}) {
     status: String(order.status || "pending").toLowerCase(),
     paymentStatus: order.payment_status || "pending",
     total: Number(order.final_amount || order.total_amount || order.total || 0),
+    createdAt: getOrderCreatedAt(order),
   };
 }
 
@@ -863,11 +878,12 @@ function normalizeProductPagination(payload = {}, fallbackPage = 1) {
   const currentPage = Number(
     meta.current_page ?? meta.currentPage ?? meta.page ?? fallbackPage,
   );
-  const perPage = Number(meta.per_page ?? meta.perPage ?? ADMIN_PRODUCT_PAGE_SIZE);
+  const perPage = Number(meta.per_page ?? meta.perPage ?? meta.limit ?? ADMIN_PRODUCT_PAGE_SIZE);
   const total = Number(meta.total ?? 0);
   const lastPage = Number(
     meta.last_page ??
       meta.lastPage ??
+      meta.totalPages ??
       (total > 0 ? Math.ceil(total / Math.max(perPage, 1)) : 1),
   );
 
@@ -1338,6 +1354,12 @@ export default function AdminDashboardPage({ page }) {
   const [brands, setBrands] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [inventoryPage, setInventoryPage] = useState(1);
+  const [inventoryServerPagination, setInventoryServerPagination] = useState(() => ({
+    currentPage: 1,
+    lastPage: 1,
+    perPage: ADMIN_INVENTORY_PAGE_SIZE,
+    total: 0,
+  }));
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -1370,6 +1392,7 @@ export default function AdminDashboardPage({ page }) {
   const [bannerImageFile, setBannerImageFile] = useState(null);
   const [bannerLocalPreviewUrl, setBannerLocalPreviewUrl] = useState("");
   const [pendingSaleConfirmation, setPendingSaleConfirmation] = useState(null);
+  const [revenueRange, setRevenueRange] = useState(30);
   const [message, setMessage] = useState("");
 
   const loadAdminData = useCallback(async (config = {}) => {
@@ -1382,7 +1405,7 @@ export default function AdminDashboardPage({ page }) {
     setMessage("");
 
     const productRequestPage = tab === "products" ? productPage : 1;
-    const productRequestPageSize = tab === "inventory" ? 100 : ADMIN_PRODUCT_PAGE_SIZE;
+    const productRequestPageSize = ADMIN_PRODUCT_PAGE_SIZE;
     const productSearch =
       tab === "products" ? tabSearch.products.trim() || undefined : undefined;
     const staffSearch =
@@ -1411,19 +1434,23 @@ export default function AdminDashboardPage({ page }) {
     }
 
     if (["products", "categories"].includes(tab)) {
-      addRequest("categories", adminService.getCategories(config));
+      addRequest("categories", adminService.getCategories({}, config));
     }
 
     if (tab === "products") {
-      addRequest("brands", adminService.getBrands());
+      addRequest("brands", adminService.getBrands({ page: 1, per_page: 100 }, config));
     }
 
     if (["dashboard", "inventory"].includes(tab)) {
-      addRequest("inventory", adminService.getInventory(config));
+      addRequest("inventory", adminService.getInventory({
+        page: inventoryPage,
+        per_page: ADMIN_INVENTORY_PAGE_SIZE,
+        search: tab === "inventory" ? tabSearch.inventory.trim() || undefined : undefined,
+      }, config));
     }
 
     if (["dashboard", "orders"].includes(tab)) {
-      addRequest("orders", adminService.getOrders(config));
+      addRequest("orders", adminService.getOrders({ page: 1, per_page: 20 }, config));
     }
 
     if (tab === "users") {
@@ -1492,6 +1519,7 @@ export default function AdminDashboardPage({ page }) {
 
     if (results.inventory?.status === "fulfilled") {
       setInventory(normalizeInventoryItems(results.inventory.value, productList));
+      setInventoryServerPagination(normalizeProductPagination(results.inventory.value, inventoryPage));
     }
 
     if (results.orders?.status === "fulfilled") {
@@ -1548,11 +1576,13 @@ export default function AdminDashboardPage({ page }) {
     customerStatusFilter,
     currentRole,
     initialized,
+    inventoryPage,
     isAuthenticated,
     productPage,
     staffPage,
     tab,
     tabSearch.customers,
+    tabSearch.inventory,
     tabSearch.products,
     tabSearch.staff,
     token,
@@ -1581,7 +1611,56 @@ export default function AdminDashboardPage({ page }) {
   }, [productLocalPreviewUrl]);
 
   const dashboard = useMemo(() => {
-    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+    const rangeStart = new Date();
+    rangeStart.setHours(0, 0, 0, 0);
+    rangeStart.setDate(rangeStart.getDate() - revenueRange + 1);
+    const revenueOrders = orders.filter((order) => {
+      if (!isRevenueOrder(order)) return false;
+      const createdAt = new Date(order.createdAt);
+      return !Number.isNaN(createdAt.getTime()) && createdAt >= rangeStart;
+    });
+    const totalRevenue = revenueOrders.reduce(
+      (sum, order) => sum + order.total,
+      0,
+    );
+    const previousStart = new Date(rangeStart);
+    previousStart.setDate(previousStart.getDate() - revenueRange);
+    const previousRevenue = orders.reduce((sum, order) => {
+      if (!isRevenueOrder(order)) return sum;
+      const createdAt = new Date(order.createdAt);
+      return !Number.isNaN(createdAt.getTime()) &&
+        createdAt >= previousStart &&
+        createdAt < rangeStart
+        ? sum + order.total
+        : sum;
+    }, 0);
+    const revenueChange =
+      previousRevenue > 0
+        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
+        : totalRevenue > 0
+          ? 100
+          : 0;
+    const bucketCount = revenueRange === 7 ? 7 : revenueRange === 30 ? 10 : 12;
+    const bucketSize = Math.ceil(revenueRange / bucketCount);
+    const revenueBars = Array.from({ length: bucketCount }, (_, index) => {
+      const start = new Date(rangeStart);
+      start.setDate(start.getDate() + index * bucketSize);
+      const end = new Date(start);
+      end.setDate(end.getDate() + bucketSize);
+      const amount = revenueOrders.reduce((sum, order) => {
+        const createdAt = new Date(order.createdAt);
+        return createdAt >= start && createdAt < end ? sum + order.total : sum;
+      }, 0);
+
+      return {
+        amount,
+        label: new Intl.DateTimeFormat("vi-VN", {
+          day: "2-digit",
+          month: "2-digit",
+        }).format(start),
+      };
+    });
+    const maxRevenueBar = Math.max(...revenueBars.map((bar) => bar.amount), 0);
     const pendingOrders = orders.filter((order) =>
       ["pending", "processing", "confirmed"].includes(order.status),
     ).length;
@@ -1595,13 +1674,50 @@ export default function AdminDashboardPage({ page }) {
 
     return {
       totalRevenue,
+      revenueBars: revenueBars.map((bar) => ({
+        ...bar,
+        height: maxRevenueBar > 0
+          ? Math.max(4, (bar.amount / maxRevenueBar) * 100)
+          : 0,
+      })),
+      revenueChange,
+      revenueOrders,
       pendingOrders,
       shippedOrders,
       activeInventory,
       activeBanners: banners.filter((banner) => banner.status).length,
       activeUsers: customers.filter((user) => !isUserLocked(user)).length,
     };
-  }, [banners, customers, inventory, orders]);
+  }, [banners, customers, inventory, orders, revenueRange]);
+
+  const handleExportRevenue = () => {
+    const rows = [
+      ["Mã đơn", "Khách hàng", "Ngày tạo", "Trạng thái", "Doanh thu"],
+      ...dashboard.revenueOrders.map((order) => [
+        order.id,
+        order.customerName,
+        order.createdAt,
+        order.status,
+        order.total,
+      ]),
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`)
+          .join(","),
+      )
+      .join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `doanh-thu-${revenueRange}-ngay.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const productPageStart =
     productPagination.total > 0 && products.length > 0
@@ -1675,21 +1791,8 @@ export default function AdminDashboardPage({ page }) {
       ),
     [inventory, tabSearch.inventory],
   );
-  const inventoryPagination = useMemo(() => {
-    const total = filteredInventory.length;
-    const lastPage = Math.max(1, Math.ceil(total / ADMIN_INVENTORY_PAGE_SIZE));
-    return {
-      currentPage: Math.min(inventoryPage, lastPage),
-      lastPage,
-      perPage: ADMIN_INVENTORY_PAGE_SIZE,
-      total,
-    };
-  }, [filteredInventory.length, inventoryPage]);
-  const pagedInventory = useMemo(() => {
-    const start =
-      (inventoryPagination.currentPage - 1) * inventoryPagination.perPage;
-    return filteredInventory.slice(start, start + inventoryPagination.perPage);
-  }, [filteredInventory, inventoryPagination]);
+  const inventoryPagination = inventoryServerPagination;
+  const pagedInventory = filteredInventory;
   const filteredUsers = useMemo(
     () =>
       users.filter((managedUser) =>
@@ -1899,6 +2002,41 @@ export default function AdminDashboardPage({ page }) {
 
     if (name === "imageUrl") {
       setProductLocalPreviewUrl("");
+      setProductForm((current) => {
+        const imageUrl = String(nextValue || "").trim();
+        const currentImages = current.images || [];
+        const thumbnailIndex = currentImages.findIndex((image) => image.isThumbnail);
+        let nextImages;
+
+        if (!imageUrl) {
+          nextImages = thumbnailIndex >= 0
+            ? currentImages.filter((_, index) => index !== thumbnailIndex)
+            : currentImages;
+        } else if (thumbnailIndex >= 0) {
+          nextImages = currentImages.map((image, index) =>
+            index === thumbnailIndex ? { ...image, imageUrl, publicId: "" } : image,
+          );
+        } else {
+          nextImages = [{
+            imageUrl,
+            isThumbnail: true,
+            localId: createLocalId("product-image-url"),
+            productVariantId: null,
+            publicId: "",
+          }, ...currentImages.map((image) => ({ ...image, isThumbnail: false }))];
+        }
+
+        const normalizedImages = ensureThumbnailImage(nextImages);
+        const thumbnail = normalizedImages.find((image) => image.isThumbnail);
+
+        return {
+          ...current,
+          imagePublicId: thumbnail?.publicId || "",
+          images: normalizedImages,
+          imageUrl,
+        };
+      });
+      return;
     }
 
     setProductForm((current) => {
@@ -3055,9 +3193,27 @@ export default function AdminDashboardPage({ page }) {
               <p>Monitor your store's performance across all metrics.</p>
             </div>
             <div className="admin-heading-actions">
-              <button type="button">▣ Last 30 Days</button>
-              <button className="admin-primary-action" type="button">
-                ⇩ Export Report
+              <label className="admin-revenue-range">
+                <span>Khoảng thời gian</span>
+                <select
+                  aria-label="Khoảng thời gian doanh thu"
+                  onChange={(event) => setRevenueRange(Number(event.target.value))}
+                  value={revenueRange}
+                >
+                  {REVENUE_RANGES.map((range) => (
+                    <option key={range.value} value={range.value}>
+                      {range.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="admin-primary-action"
+                disabled={dashboard.revenueOrders.length === 0}
+                onClick={handleExportRevenue}
+                type="button"
+              >
+                Xuất báo cáo
               </button>
             </div>
           </div>
@@ -3065,20 +3221,27 @@ export default function AdminDashboardPage({ page }) {
           <div className="dashboard-hero-grid">
             <article className="dashboard-card revenue-card">
               <div className="card-title-row">
-                <h2>Total Revenue</h2>
+                <h2>Doanh thu</h2>
                 <div>
                   <strong>{formatCurrency(dashboard.totalRevenue)}</strong>
-                  <span>+12.5%</span>
+                  <span>
+                    {dashboard.revenueChange >= 0 ? "+" : ""}
+                    {dashboard.revenueChange.toFixed(1)}%
+                  </span>
                 </div>
               </div>
               <div className="bar-chart">
-                {chartBars.map((bar) => (
-                  <div className="bar-column" key={bar.day}>
+                {dashboard.revenueBars.map((bar, index) => (
+                  <div
+                    className="bar-column"
+                    key={`${bar.label}-${index}`}
+                    title={`${bar.label}: ${formatCurrency(bar.amount)}`}
+                  >
                     <span
-                      className={bar.active ? "active" : ""}
-                      style={{ height: `${bar.value}%` }}
+                      className={bar.amount > 0 ? "active" : ""}
+                      style={{ height: `${bar.height}%` }}
                     />
-                    <small>{bar.day}</small>
+                    <small>{bar.label}</small>
                   </div>
                 ))}
               </div>
@@ -3140,7 +3303,16 @@ export default function AdminDashboardPage({ page }) {
                         <StatusPill>{order.status}</StatusPill>
                       </td>
                       <td>{formatCurrency(order.total)}</td>
-                      <td>•••</td>
+                      <td>
+                        <button
+                          aria-label={`Xem chi tiết đơn hàng ORD-${order.id}`}
+                          className="admin-row-action"
+                          onClick={() => navigate(`/admin/orders?orderId=${encodeURIComponent(order.id)}`)}
+                          type="button"
+                        >
+                          •••
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {orders.length === 0 ? (
@@ -3198,13 +3370,6 @@ export default function AdminDashboardPage({ page }) {
               <div>
                 <small>Pending Delivery</small>
                 <strong>{dashboard.pendingOrders + dashboard.shippedOrders}</strong>
-              </div>
-            </article>
-            <article>
-              <span className="metric-icon metric-icon--purple">☆</span>
-              <div>
-                <small>Store Rating</small>
-                <strong>4.9/5</strong>
               </div>
             </article>
           </div>

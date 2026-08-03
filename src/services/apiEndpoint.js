@@ -114,6 +114,8 @@ export const API_ENDPOINTS = {
       `/admin/orders/${encodeURIComponent(orderId)}/refund`,
     orderStatus: (orderId) =>
       `/admin/orders/${encodeURIComponent(orderId)}/status`,
+    orderPaymentStatus: (orderId) =>
+      `/admin/orders/${encodeURIComponent(orderId)}/payment-status`,
     warrantyRequests: "/admin/warranty-requests",
     warrantyRequest: (requestId) =>
       `/admin/warranty-requests/${encodeURIComponent(requestId)}`,

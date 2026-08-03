@@ -1,5 +1,5 @@
 const PAYMENT_STATUS_MAP = {
-  pending: { label: "Chờ thanh toán", tone: "warning" },
+  pending: { label: "Đang chờ thanh toán", tone: "warning" },
   unpaid: { label: "Chưa thanh toán", tone: "warning" },
   paid: { label: "Đã thanh toán", tone: "success" },
   success: { label: "Đã thanh toán", tone: "success" },
@@ -21,14 +21,15 @@ function normalizeStatus(value) {
 
 export default function PaymentStatusBadge({ label, value }) {
   const key = normalizeStatus(value || label);
-  const status = PAYMENT_STATUS_MAP[key] || {
+  const knownStatus = PAYMENT_STATUS_MAP[key];
+  const status = knownStatus || {
     label: label || value || "Chưa cập nhật",
     tone: "neutral",
   };
 
   return (
     <span className={`status-badge status-badge--${status.tone}`}>
-      {label || status.label}
+      {knownStatus ? status.label : label || status.label}
     </span>
   );
 }

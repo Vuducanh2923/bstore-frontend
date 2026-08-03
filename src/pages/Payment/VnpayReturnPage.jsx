@@ -39,6 +39,16 @@ const PAID_OR_CLOSED_PAYMENT_STATUSES = new Set([
   "canceled",
   "refunded",
 ]);
+
+export function isSettledVnpayResponse(payload = {}) {
+  const data = payload?.data || {};
+
+  return payload.success === true && (
+    data.successful === true ||
+    data.payment_status === "paid" ||
+    data.payment?.status === "paid"
+  );
+}
 const VNPAY_NOT_RETRYABLE_MESSAGE =
   "Đơn hàng không còn ở trạng thái chờ thanh toán.";
 const VNPAY_SIGNATURE_ERROR_MESSAGE = "Lỗi chữ ký thanh toán VNPAY.";
@@ -310,13 +320,7 @@ export default function VnpayReturnPage() {
         });
         const payload = response?.data || {};
         const data = payload?.data || {};
-        const isVnpaySuccess =
-          payload.success === true ||
-          data.verified === true ||
-          data.successful === true ||
-          data.payment_status === "paid" ||
-          (queryParams.vnp_ResponseCode === "00" &&
-            queryParams.vnp_TransactionStatus === "00");
+        const isVnpaySuccess = isSettledVnpayResponse(payload);
 
         if (ignored) {
           return;

@@ -304,11 +304,11 @@ export const adminService = {
     ),
   updateOrderStatus: (orderId, payload) =>
     toPayload(api.patch(API_ENDPOINTS.admin.orderStatus(orderId), payload)),
-  updatePaymentStatus: (orderId, paymentStatus, orderStatus) =>
+  updateOrderPaymentStatus: (orderId, paymentStatus) =>
     toPayload(
       api.patch(
-        API_ENDPOINTS.admin.orderStatus(orderId),
-        { payment_status: paymentStatus, status: orderStatus },
+        API_ENDPOINTS.admin.orderPaymentStatus(orderId),
+        { payment_status: paymentStatus },
         SUPPRESS_GLOBAL_ERROR_CONFIG,
       ),
     ),

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import PaymentStatusBadge from "../../../components/PaymentStatusBadge";
@@ -406,6 +406,11 @@ function normalizeOrder(order = {}) {
       order.payment_status_label || order.paymentStatusLabel,
       "",
     ),
+    paidAt:
+      order.paid_at ||
+      order.paidAt ||
+      order.payment?.paid_at ||
+      order.payment?.paidAt,
     raw: order,
     shippingMethod: displayText(
       order.shipping_method ||
@@ -469,27 +474,49 @@ function OrderStatusControl({
   );
 }
 
-function CodPaymentStatusControl({ disabled, locked, onChange, status, statusLabel }) {
+const PAYMENT_STATUS_LABELS = {
+  unpaid: "Chưa thanh toán",
+  pending: "Đang chờ thanh toán",
+  paid: "Đã thanh toán",
+  failed: "Thanh toán thất bại",
+  refunded: "Đã hoàn tiền",
+};
+
+function normalizePaymentStatus(status) {
+  const normalized = normalizeWorkflowKey(status);
+  if (["success", "completed"].includes(normalized)) return "paid";
+  return PAYMENT_STATUS_LABELS[normalized] ? normalized : "unpaid";
+}
+
+function PaymentStatusControl({ disabled, isCodOrder, locked, onChange, status, statusLabel }) {
   const normalizedStatus = normalizeWorkflowKey(status);
-  const value = ["paid", "success", "completed"].includes(normalizedStatus)
-    ? "paid"
-    : "unpaid";
+  const value = normalizePaymentStatus(normalizedStatus);
+  const codOptions = ["unpaid", "paid"];
+  const visibleOptions = isCodOrder && !codOptions.includes(value)
+    ? [value, ...codOptions]
+    : isCodOrder ? codOptions : Object.keys(PAYMENT_STATUS_LABELS);
 
   return (
     <div className="order-status-control order-payment-status-control">
-      <span>Thanh toán COD</span>
+      <span>Trạng thái thanh toán</span>
       <PaymentStatusBadge label={statusLabel} value={value} />
       <select
-        aria-label="Trạng thái thanh toán COD"
-        disabled={disabled || locked}
+        aria-label="Trạng thái thanh toán"
+        disabled={disabled || locked || !isCodOrder}
         onChange={(event) => onChange(event.target.value)}
         value={value}
       >
-        <option value="unpaid">Chưa thanh toán</option>
-        <option value="paid">Đã thanh toán</option>
+        {visibleOptions.map((option) => (
+          <option disabled={isCodOrder && !codOptions.includes(option)} key={option} value={option}>
+            {PAYMENT_STATUS_LABELS[option]}
+          </option>
+        ))}
       </select>
+      {!isCodOrder ? (
+        <small>Trạng thái thanh toán VNPay được xác nhận tự động từ cổng thanh toán.</small>
+      ) : null}
       {locked ? (
-        <small>Đơn đã hoàn tất và bị khóa. Cần ghi nhận thanh toán trước khi hoàn tất đơn.</small>
+        <small>Đơn đã thanh toán hoặc đã hủy nên không thể chỉnh trạng thái thanh toán.</small>
       ) : null}
     </div>
   );
@@ -618,6 +645,7 @@ function DetailSkeleton() {
 function ConfirmDialog({
   confirmLabel = "Xác nhận",
   description,
+  details,
   onCancel,
   onConfirm,
   pending,
@@ -629,6 +657,14 @@ function ConfirmDialog({
       <section aria-modal="true" className="order-confirm-modal" role="dialog">
         <h2>{title}</h2>
         <p>{description}</p>
+        {details ? (
+          <dl className="order-confirm-details">
+            <div><dt>Mã đơn hàng</dt><dd>#{details.orderCode}</dd></div>
+            <div><dt>Phương thức thanh toán</dt><dd>{details.paymentMethod}</dd></div>
+            <div><dt>Trạng thái hiện tại</dt><dd>{details.currentStatus}</dd></div>
+            <div><dt>Trạng thái mới</dt><dd>{details.nextStatus}</dd></div>
+          </dl>
+        ) : null}
         <div className="modal-actions">
           <button disabled={pending} onClick={onCancel} type="button">
             Đóng
@@ -806,12 +842,12 @@ function OrderDetailModal({
   const shippingLocked = ["shipping", "shipped", "delivering", "delivered", "completed"].includes(
     normalizeWorkflowKey(normalizedOrder.status),
   );
-  const orderEditingLocked = ["completed", "cancelled", "canceled"].includes(
-    normalizeWorkflowKey(normalizedOrder.status),
-  );
   const isCodOrder = ["cod", "cash_on_delivery", "cash on delivery"].includes(
     normalizeWorkflowKey(normalizedOrder.paymentMethod),
   );
+  const paymentEditingLocked = ["cancelled", "canceled"].includes(
+    normalizeWorkflowKey(normalizedOrder.status),
+  ) || normalizePaymentStatus(normalizedOrder.paymentStatus) === "paid";
   const tabs = [
     { key: "timeline", label: "Timeline" },
     { key: "complaints", label: "Khiếu nại" },
@@ -829,7 +865,7 @@ function OrderDetailModal({
             <span>Chi tiết đơn hàng</span>
             <h2>{orderTitle ? `#${orderTitle}` : "Đơn hàng"}</h2>
           </div>
-          <button aria-label="Đóng" onClick={onClose} type="button">
+          <button aria-label="Đóng" disabled={actionPending} onClick={onClose} type="button">
             ×
           </button>
         </div>
@@ -854,6 +890,10 @@ function OrderDetailModal({
                   <div>
                     <dt>Thanh toán</dt>
                     <dd>{normalizedOrder.paymentMethod}</dd>
+                  </div>
+                  <div>
+                    <dt>Thanh toán lúc</dt>
+                    <dd>{formatDateTime(normalizedOrder.paidAt)}</dd>
                   </div>
                   <div>
                     <dt>Vận chuyển</dt>
@@ -925,27 +965,16 @@ function OrderDetailModal({
                 }
                 status={normalizedOrder.status}
               />
-              {isCodOrder ? (
-                <CodPaymentStatusControl
-                  disabled={actionPending}
-                  locked={orderEditingLocked}
-                  onChange={(paymentStatus) =>
-                    onPaymentStatusChange(
-                      normalizedOrder.id,
-                      paymentStatus,
-                      normalizedOrder.paymentStatus,
-                      normalizedOrder.status,
-                    )
-                  }
-                  status={normalizedOrder.paymentStatus}
-                  statusLabel={normalizedOrder.paymentStatusLabel}
-                />
-              ) : (
-                <PaymentStatusBadge
-                  label={normalizedOrder.paymentStatusLabel}
-                  value={normalizedOrder.paymentStatus}
-                />
-              )}
+              <PaymentStatusControl
+                disabled={actionPending}
+                isCodOrder={isCodOrder}
+                locked={paymentEditingLocked}
+                onChange={(paymentStatus) =>
+                  onPaymentStatusChange(normalizedOrder, paymentStatus)
+                }
+                status={normalizedOrder.paymentStatus}
+                statusLabel={normalizedOrder.paymentStatusLabel}
+              />
               <div className="order-workflow-badges">
                 <WorkflowBadge label="Yêu cầu hủy" status={cancelRequestStatus} type="cancel" />
                 <WorkflowBadge label="Hoàn tiền" status={refundInfo.status} type="refund" />
@@ -1094,10 +1123,11 @@ export default function OrderListPage() {
   });
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
+  const confirmSubmissionRef = useRef(false);
 
   const invalidateOrderQueries = async (orderId) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["orders"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-orders"] }),
       orderId
         ? queryClient.invalidateQueries({ queryKey: ["admin", "order", orderId] })
         : Promise.resolve(),
@@ -1113,7 +1143,7 @@ export default function OrderListPage() {
       };
     },
     placeholderData: (previousData) => previousData,
-    queryKey: ["orders", page, {}],
+    queryKey: ["admin-orders", page, {}],
     staleTime: 60_000,
   });
 
@@ -1156,21 +1186,22 @@ export default function OrderListPage() {
   });
 
   const updatePaymentStatusMutation = useMutation({
-    mutationFn: ({ orderId, orderStatus, paymentStatus }) =>
-      adminService.updatePaymentStatus(orderId, paymentStatus, orderStatus),
+    mutationFn: ({ orderId, paymentStatus }) =>
+      adminService.updateOrderPaymentStatus(orderId, paymentStatus),
     onError: (error) => {
-      showToast(
-        getStatusErrorMessage(error, "Không thể cập nhật trạng thái thanh toán COD."),
-        "error",
-      );
+      const status = Number(error?.response?.status || 0);
+      const messages = {
+        401: "Phiên đăng nhập đã hết hạn.",
+        403: "Bạn không có quyền cập nhật trạng thái thanh toán.",
+        404: "Không tìm thấy đơn hàng.",
+        409: "Trạng thái thanh toán đã thay đổi bởi người khác hoặc dữ liệu đang xung đột.",
+        422: "Dữ liệu trạng thái thanh toán không hợp lệ.",
+        500: "Có lỗi hệ thống, vui lòng thử lại.",
+      };
+      showToast(getStatusErrorMessage(error, messages[status] || "Không thể cập nhật trạng thái thanh toán."), "error");
     },
-    onSuccess: async (data, variables) => {
-      if (data?.payment_status !== "paid") {
-        showToast("Máy chủ chưa xác nhận trạng thái thanh toán là đã thanh toán.", "error");
-        return;
-      }
-
-      showToast("Đã ghi nhận thanh toán đơn hàng COD.", "success");
+    onSuccess: async (_, variables) => {
+      showToast("Đã cập nhật trạng thái thanh toán.", "success");
       await invalidateOrderQueries(variables.orderId);
     },
   });
@@ -1342,35 +1373,26 @@ export default function OrderListPage() {
     });
   };
 
-  const requestPaymentStatusChange = (
-    orderId,
-    paymentStatus,
-    currentPaymentStatus = "",
-    orderStatus = "",
-  ) => {
-    const currentIsPaid = ["paid", "success", "completed"].includes(
-      normalizeWorkflowKey(currentPaymentStatus),
-    );
-    const nextIsPaid = paymentStatus === "paid";
-
-    if (!orderId || currentIsPaid === nextIsPaid) {
-      return;
-    }
-
-    if (!nextIsPaid) {
-      showToast("Đơn đã thanh toán không thể chuyển về chưa thanh toán.", "error");
+  const requestPaymentStatusChange = (order, paymentStatus) => {
+    const currentPaymentStatus = normalizePaymentStatus(order?.paymentStatus);
+    if (!order?.id || currentPaymentStatus === paymentStatus || updatePaymentStatusMutation.isPending) {
       return;
     }
 
     setConfirmAction({
       confirmLabel: "Cập nhật",
-      description: "Xác nhận nhân viên đã thu tiền của đơn hàng COD này?",
+      description: `Bạn có chắc muốn chuyển trạng thái thanh toán từ “${PAYMENT_STATUS_LABELS[currentPaymentStatus]}” sang “${PAYMENT_STATUS_LABELS[paymentStatus]}” không?`,
+      details: {
+        orderCode: order.orderCode || order.id,
+        paymentMethod: order.paymentMethod,
+        currentStatus: PAYMENT_STATUS_LABELS[currentPaymentStatus],
+        nextStatus: PAYMENT_STATUS_LABELS[paymentStatus],
+      },
       onConfirm: () => updatePaymentStatusMutation.mutateAsync({
-        orderId,
-        orderStatus,
+        orderId: order.id,
         paymentStatus,
       }),
-      title: "Xác nhận trạng thái thanh toán COD",
+      title: "Xác nhận trạng thái thanh toán",
     });
   };
 
@@ -1398,15 +1420,18 @@ export default function OrderListPage() {
   };
 
   const handleConfirmAction = async () => {
-    if (!confirmAction?.onConfirm) {
+    if (!confirmAction?.onConfirm || actionPending || confirmSubmissionRef.current) {
       return;
     }
 
+    confirmSubmissionRef.current = true;
     try {
       await confirmAction.onConfirm();
       setConfirmAction(null);
     } catch {
-      setConfirmAction(null);
+      // Keep the confirmation open so the user can review the backend error or retry.
+    } finally {
+      confirmSubmissionRef.current = false;
     }
   };
 
@@ -1583,7 +1608,10 @@ export default function OrderListPage() {
         <ConfirmDialog
           confirmLabel={confirmAction.confirmLabel}
           description={confirmAction.description}
-          onCancel={() => setConfirmAction(null)}
+          details={confirmAction.details}
+          onCancel={() => {
+            if (!actionPending) setConfirmAction(null);
+          }}
           onConfirm={handleConfirmAction}
           pending={actionPending}
           title={confirmAction.title}

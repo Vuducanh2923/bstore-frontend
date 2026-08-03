@@ -8482,6 +8482,28 @@ img {
   line-height: 1.55;
 }
 
+.order-confirm-details {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.order-confirm-details > div {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 1.4fr);
+  gap: 12px;
+}
+
+.order-confirm-details dt {
+  color: var(--text-muted, #64748b);
+}
+
+.order-confirm-details dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
 .order-cancel-reason {
   display: grid;
   gap: 8px;

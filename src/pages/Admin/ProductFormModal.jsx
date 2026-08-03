@@ -270,7 +270,7 @@ export default function ProductFormModal({
                   <h3>Biến thể sản phẩm</h3>
                 </div>
                 <button onClick={onAddVariant} type="button">
-                  + Thêm biến thể
+                  Thêm biến thể
                 </button>
               </div>
 
@@ -457,7 +457,7 @@ export default function ProductFormModal({
                                 onClick={() => onAddVariantSpec(variantIndex)}
                                 type="button"
                               >
-                                + Thêm thông số
+                                Thêm thông số
                               </button>
                             </div>
                             <div className="spec-row-list">
@@ -517,7 +517,7 @@ export default function ProductFormModal({
                 onClick={onAddVariant}
                 type="button"
               >
-                + Thêm biến thể sản phẩm
+                Thêm biến thể sản phẩm
               </button>
             </section>
 
@@ -528,7 +528,7 @@ export default function ProductFormModal({
                   <h3>Thông số kỹ thuật</h3>
                 </div>
                 <button onClick={onAddProductSpecGroup} type="button">
-                  + Thêm nhóm
+                  Thêm nhóm
                 </button>
               </div>
 
@@ -599,7 +599,7 @@ export default function ProductFormModal({
                       onClick={() => onAddProductSpec(groupIndex)}
                       type="button"
                     >
-                      + Thêm thông số
+                      Thêm thông số
                     </button>
                   </article>
                 ))}

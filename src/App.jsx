@@ -35,6 +35,11 @@ const PolicyPage = lazy(() => import("./pages/Policy/PolicyPage"));
 const ProductDetailPage = lazy(() => import("./pages/ProductDetail/ProductDetailPage"));
 const ProductsPage = lazy(() => import("./pages/Products/ProductsPage"));
 const AdminDashboardPage = lazy(() => import("./pages/Admin/AdminDashboardPage"));
+const AdminProductPage = lazy(() => import("./pages/Admin/Products/ProductPage"));
+const AdminBannerPage = lazy(() => import("./pages/Admin/Banners/BannerPage"));
+const AdminCategoryPage = lazy(() => import("./pages/Admin/Categories/CategoryPage"));
+const AdminInventoryPage = lazy(() => import("./pages/Admin/Inventory/InventoryPage"));
+const AdminSettingsPage = lazy(() => import("./pages/Admin/Settings/SettingsPage"));
 const BrandPage = lazy(() => import("./pages/Admin/Brands/BrandPage"));
 const CustomerDetailPage = lazy(() => import("./pages/Admin/Customers/CustomerDetailPage"));
 const CustomerListPage = lazy(() => import("./pages/Admin/Customers/CustomerListPage"));
@@ -204,11 +209,11 @@ function App() {
                 path="admin"
               >
                 <Route index element={<AdminDashboardPage />} />
-                <Route path="products" element={<AdminDashboardPage page="products" />} />
-                <Route path="banners" element={<AdminDashboardPage page="banners" />} />
-                <Route path="categories" element={<AdminDashboardPage page="categories" />} />
-                <Route path="inventory" element={<AdminDashboardPage page="inventory" />} />
-                <Route path="settings" element={<AdminDashboardPage page="settings" />} />
+                <Route path="products" element={<AdminProductPage />} />
+                <Route path="banners" element={<AdminBannerPage />} />
+                <Route path="categories" element={<AdminCategoryPage />} />
+                <Route path="inventory" element={<AdminInventoryPage />} />
+                <Route path="settings" element={<AdminSettingsPage />} />
                 <Route path="brands" element={<BrandPage />} />
                 <Route path="customers" element={<CustomerListPage />} />
                 <Route path="customers/:id" element={<CustomerDetailPage />} />

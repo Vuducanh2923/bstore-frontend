@@ -199,7 +199,7 @@ export default function BrandPage() {
           onClick={openCreateForm}
           type="button"
         >
-          + Thêm
+          Thêm
         </button>
       </div>
 

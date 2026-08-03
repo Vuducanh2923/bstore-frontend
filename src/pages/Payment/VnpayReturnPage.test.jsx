@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSettledVnpayResponse } from "./VnpayReturnPage";
+import { isSettledVnpayResponse } from "./vnpayReturnUtils";
 
 describe("VNPAY return settlement", () => {
   it("does not report success when a verified provider response is still pending locally", () => {

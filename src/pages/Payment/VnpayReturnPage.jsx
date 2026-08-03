@@ -12,6 +12,7 @@ import {
   readPendingVnpayPayment,
   savePendingVnpayPayment,
 } from "../../utils/paymentSession";
+import { isSettledVnpayResponse } from "./vnpayReturnUtils";
 
 const SUCCESS_VALUES = new Set([
   "00",
@@ -40,15 +41,6 @@ const PAID_OR_CLOSED_PAYMENT_STATUSES = new Set([
   "refunded",
 ]);
 
-export function isSettledVnpayResponse(payload = {}) {
-  const data = payload?.data || {};
-
-  return payload.success === true && (
-    data.successful === true ||
-    data.payment_status === "paid" ||
-    data.payment?.status === "paid"
-  );
-}
 const VNPAY_NOT_RETRYABLE_MESSAGE =
   "Đơn hàng không còn ở trạng thái chờ thanh toán.";
 const VNPAY_SIGNATURE_ERROR_MESSAGE = "Lỗi chữ ký thanh toán VNPAY.";

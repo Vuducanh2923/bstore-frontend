@@ -132,30 +132,20 @@ function normalizeOrder(order = {}) {
   };
 }
 
-function TableSkeleton() {
+function OrderListSkeleton() {
   return (
-    <table className="admin-table account-order-table">
-      <thead>
-        <tr>
-          {Array.from({ length: 7 }).map((_, index) => (
-            <th key={`heading-${index}`}>
-              <span className="skeleton-line order-skeleton-line" />
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {Array.from({ length: 4 }).map((_, rowIndex) => (
-          <tr key={`row-${rowIndex}`}>
-            {Array.from({ length: 7 }).map((_, cellIndex) => (
-              <td key={`cell-${rowIndex}-${cellIndex}`}>
-                <span className="skeleton-line order-skeleton-line" />
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div aria-label="Đang tải lịch sử mua hàng" className="order-history-list">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div className="order-history-card order-history-card--skeleton" key={index}>
+          <div className="order-history-card-main">
+            <span className="skeleton-line order-skeleton-code" />
+            <span className="skeleton-line order-skeleton-date" />
+          </div>
+          <span className="skeleton-line order-skeleton-status" />
+          <span className="skeleton-line order-skeleton-total" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -250,14 +240,15 @@ export default function OrderHistory() {
           <h2>Lịch sử mua hàng</h2>
           <p>Theo dõi trạng thái xử lý, giao hàng và thanh toán.</p>
         </div>
+        {!ordersQuery.isLoading && orders.length > 0 ? (
+          <span className="order-history-count">{orders.length} đơn hàng</span>
+        ) : null}
       </div>
 
       <StatusMessage tone="error">{errorMessage}</StatusMessage>
 
       {ordersQuery.isLoading ? (
-        <div className="admin-table-wrap account-table-wrap">
-          <TableSkeleton />
-        </div>
+        <OrderListSkeleton />
       ) : null}
 
       {!ordersQuery.isLoading && orders.length === 0 ? (
@@ -268,46 +259,56 @@ export default function OrderHistory() {
       ) : null}
 
       {!ordersQuery.isLoading && orders.length > 0 ? (
-        <div className="admin-table-wrap account-table-wrap">
-          <table className="admin-table account-order-table">
-            <thead>
-              <tr>
-                <th>Mã đơn hàng</th>
-                <th>Ngày đặt</th>
-                <th>Tổng tiền</th>
-                <th>Trạng thái đơn hàng</th>
-                <th>Trạng thái thanh toán</th>
-                <th>Địa chỉ giao hàng</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id || order.orderCode}>
-                  <td className="admin-link">
-                    #{displayText(order.orderCode, order.id)}
-                  </td>
-                  <td>{formatDate(order.createdAt)}</td>
-                  <td>{formatCurrency(order.finalAmount)}</td>
-                  <td>
-                    <StatusBadge label={order.statusLabel} value={order.status} />
-                  </td>
-                  <td>
-                    <PaymentStatusBadge
-                      label={order.paymentStatusLabel}
-                      value={order.paymentStatus}
-                    />
-                  </td>
-                  <td>{order.shippingAddress || "Chưa cập nhật"}</td>
-                  <td>
-                    <button onClick={() => handleOpenDetail(order)} type="button">
-                      Xem chi tiết
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="order-history-list">
+          {orders.map((order) => (
+            <article className="order-history-card" key={order.id || order.orderCode}>
+              <div className="order-history-card-main">
+                <div className="order-history-code-row">
+                  <span className="order-history-icon" aria-hidden="true">#</span>
+                  <div>
+                    <span className="order-history-label">Mã đơn hàng</span>
+                    <strong title={`#${displayText(order.orderCode, order.id)}`}>
+                      #{displayText(order.orderCode, order.id)}
+                    </strong>
+                  </div>
+                </div>
+                <span className="order-history-date">Đặt ngày {formatDate(order.createdAt)}</span>
+              </div>
+
+              <div className="order-history-statuses">
+                <div>
+                  <span className="order-history-label">Đơn hàng</span>
+                  <StatusBadge label={order.statusLabel} value={order.status} />
+                </div>
+                <div>
+                  <span className="order-history-label">Thanh toán</span>
+                  <PaymentStatusBadge
+                    label={order.paymentStatusLabel}
+                    value={order.paymentStatus}
+                  />
+                </div>
+              </div>
+
+              <div className="order-history-delivery">
+                <span className="order-history-label">Giao đến</span>
+                <p>{order.shippingAddress || "Chưa cập nhật"}</p>
+              </div>
+
+              <div className="order-history-card-action">
+                <div>
+                  <span className="order-history-label">Tổng tiền</span>
+                  <strong>{formatCurrency(order.finalAmount)}</strong>
+                </div>
+                <button
+                  aria-label={`Xem chi tiết đơn hàng ${displayText(order.orderCode, order.id)}`}
+                  onClick={() => handleOpenDetail(order)}
+                  type="button"
+                >
+                  Xem chi tiết <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </article>
+          ))}
           {ordersQuery.isFetching ? (
             <p className="muted-text order-inline-refresh">
               Đang cập nhật dữ liệu...

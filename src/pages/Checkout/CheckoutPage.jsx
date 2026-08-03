@@ -1,11 +1,15 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import StatusMessage from "../../components/StatusMessage";
 import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
 import { useToast } from "../../context/ToastContext";
-import { getApiErrorMessage } from "../../services/api";
-import { customerOrderService, paymentService } from "../../services/bstoreService";
+import { getApiErrorMessage, readCollection } from "../../services/api";
+import {
+  customerOrderService,
+  paymentService,
+  profileService,
+} from "../../services/bstoreService";
 import orderApi from "../../services/orderApi";
 import { previewDiscountCode } from "../../services/discountCodeApi";
 import { formatCurrency, getPaymentRedirectUrl } from "../../utils/formatters";
@@ -39,6 +43,20 @@ function normalizeStatus(value) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+}
+
+function isDefaultAddress(address = {}) {
+  const value = address.is_default ?? address.isDefault;
+  return value === true || value === 1 || value === "1";
+}
+
+function formatShippingAddress(address = {}) {
+  return [
+    address.address || address.street,
+    address.ward,
+    address.district,
+    address.province || address.city,
+  ].filter(Boolean).join(", ");
 }
 
 function getOrderAmount(order = {}, fallbackAmount = 0) {
@@ -148,8 +166,61 @@ export default function CheckoutPage() {
     initialPendingVnpayOrder,
   );
   const checkoutInFlightRef = useRef(false);
+  const touchedContactFieldsRef = useRef(new Set());
+
+  useEffect(() => {
+    if (!user?.id) {
+      return undefined;
+    }
+
+    let ignored = false;
+
+    async function loadDefaultAddress() {
+      try {
+        const payload = await profileService.getAddresses();
+        const addresses = readCollection(payload, ["addresses"]);
+        const defaultAddress = addresses.find(isDefaultAddress);
+
+        if (!defaultAddress || ignored) {
+          return;
+        }
+
+        const defaultContact = {
+          address: formatShippingAddress(defaultAddress),
+          fullName:
+            defaultAddress.receiver_name || defaultAddress.receiverName || "",
+          phone:
+            defaultAddress.receiver_phone || defaultAddress.receiverPhone || "",
+        };
+
+        setForm((current) => {
+          const nextForm = { ...current };
+
+          for (const [field, value] of Object.entries(defaultContact)) {
+            if (value && !touchedContactFieldsRef.current.has(field)) {
+              nextForm[field] = value;
+            }
+          }
+
+          return nextForm;
+        });
+      } catch {
+        // Checkout remains usable with manually entered delivery information.
+      }
+    }
+
+    loadDefaultAddress();
+
+    return () => {
+      ignored = true;
+    };
+  }, [user?.id]);
 
   const handleChange = (event) => {
+    if (["fullName", "phone", "address"].includes(event.target.name)) {
+      touchedContactFieldsRef.current.add(event.target.name);
+    }
+
     setForm((current) => ({
       ...current,
       [event.target.name]: event.target.value,

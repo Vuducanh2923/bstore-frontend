@@ -7644,6 +7644,169 @@ img {
   min-width: 900px;
 }
 
+.order-history-count {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 7px 11px;
+}
+
+.order-history-list {
+  display: grid;
+  gap: 12px;
+}
+
+.order-history-card {
+  display: grid;
+  grid-template-columns: minmax(155px, 0.8fr) minmax(245px, 1.3fr) minmax(180px, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  border: 1px solid #dfe5f2;
+  border-radius: 8px;
+  background: #fff;
+  padding: 18px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.order-history-card:hover {
+  border-color: #b9cce2;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+}
+
+.order-history-card-main,
+.order-history-statuses,
+.order-history-statuses > div,
+.order-history-delivery,
+.order-history-card-action {
+  min-width: 0;
+}
+
+.order-history-card-main,
+.order-history-statuses,
+.order-history-card-action {
+  display: grid;
+  gap: 8px;
+}
+
+.order-history-code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.order-history-code-row > div {
+  min-width: 0;
+}
+
+.order-history-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-weight: 900;
+}
+
+.order-history-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.order-history-code-row strong {
+  display: block;
+  overflow: hidden;
+  color: #111827;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-history-date {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.order-history-statuses {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.order-history-statuses .status-badge {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.order-history-delivery {
+  min-width: 0;
+}
+
+.order-history-delivery p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: #344054;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.order-history-card-action {
+  justify-items: end;
+  min-width: 145px;
+  text-align: right;
+}
+
+.order-history-card-action strong {
+  color: #111827;
+  font-size: 17px;
+}
+
+.order-history-card-action button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #b9cce2;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--primary-dark);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 11px;
+}
+
+.order-history-card-action button:hover,
+.order-history-card-action button:focus-visible {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  outline: none;
+}
+
+.order-history-card--skeleton {
+  min-height: 104px;
+}
+
+.order-skeleton-code { width: 135px; }
+.order-skeleton-date { width: 105px; }
+.order-skeleton-status { width: 210px; }
+.order-skeleton-total { width: 125px; justify-self: end; }
+
+.order-inline-refresh {
+  margin: 2px 0 0;
+  text-align: center;
+}
+
 .order-detail-content {
   display: grid;
   gap: 18px;
@@ -7990,6 +8153,17 @@ img {
   .customer-filter-card {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .order-history-card {
+    grid-template-columns: minmax(150px, 0.8fr) minmax(240px, 1.2fr) auto;
+  }
+
+  .order-history-delivery {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    border-top: 1px solid #edf0f5;
+    padding-top: 12px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -8034,6 +8208,48 @@ img {
   .modal-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .order-history-count {
+    align-self: flex-start;
+  }
+
+  .order-history-card {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .order-history-delivery {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .order-history-statuses {
+    gap: 12px;
+  }
+
+  .order-history-card-action {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    justify-items: stretch;
+    border-top: 1px solid #edf0f5;
+    min-width: 0;
+    padding-top: 14px;
+    text-align: left;
+  }
+
+  .order-history-card-action button {
+    justify-self: end;
+  }
+
+  .order-history-card--skeleton {
+    min-height: 230px;
+  }
+
+  .order-skeleton-status,
+  .order-skeleton-total {
+    justify-self: start;
   }
 
   .account-form-grid,

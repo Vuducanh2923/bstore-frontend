@@ -180,7 +180,9 @@ export default function OrderDetailView({
   errorMessage,
   loading,
   onCancelOrder,
+  onRetryPayment,
   order,
+  paymentPending,
 }) {
   const [activeTab, setActiveTab] = useState("timeline");
   const [showCancelDialog, setShowCancelDialog] = useState(false);
@@ -268,6 +270,16 @@ export default function OrderDetailView({
           </div>
 
           <div className="order-cancel-panel">
+            {onRetryPayment ? (
+              <button
+                className="primary-button"
+                disabled={paymentPending}
+                onClick={onRetryPayment}
+                type="button"
+              >
+                {paymentPending ? "Đang tạo thanh toán..." : "Thanh toán VNPAY"}
+              </button>
+            ) : null}
             {cancelable ? (
               <button
                 className="danger-button"

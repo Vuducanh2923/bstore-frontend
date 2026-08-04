@@ -90,7 +90,27 @@ function productToCartPayload(product, quantity) {
     price,
     quantity,
     subtotal: price * quantity,
+    available_quantity: normalized.availableQuantity,
   };
+}
+
+function assertWithinStockLimit(itemPayload, currentQuantity = 0) {
+  const availableQuantity = Number(itemPayload.available_quantity);
+
+  if (!Number.isFinite(availableQuantity)) {
+    return;
+  }
+
+  const requestedTotal = currentQuantity + Number(itemPayload.quantity);
+
+  if (requestedTotal > availableQuantity) {
+    const remainingQuantity = Math.max(0, availableQuantity - currentQuantity);
+    throw new Error(
+      remainingQuantity > 0
+        ? `Bạn chỉ có thể thêm ${remainingQuantity} sản phẩm nữa. Tồn kho tối đa là ${availableQuantity}.`
+        : `Bạn đã có đủ ${availableQuantity} sản phẩm trong giỏ hàng.`,
+    );
+  }
 }
 
 export function CartProvider({ children }) {
@@ -179,6 +199,7 @@ export function CartProvider({ children }) {
       const existingItem = items.find(
         (item) => Number(item.variantId) === Number(itemPayload.product_variant_id),
       );
+      assertWithinStockLimit(itemPayload, Number(existingItem?.quantity || 0));
       let targetCartId = cartId;
 
       if (!targetCartId) {
@@ -222,13 +243,14 @@ export function CartProvider({ children }) {
   );
 
   const updateQuantity = useCallback(
-    async (cartItemId, quantity) => {
-      await cartService.updateItem(cartItemId, {
-        quantity,
-      });
-      return refreshCart();
+    async (cartItemId, quantity, options = {}) => {
+      if (!options.refreshOnly) {
+        await cartService.updateItem(cartItemId, { quantity });
+      }
+
+      return options.refresh === false ? items : refreshCart();
     },
-    [refreshCart],
+    [items, refreshCart],
   );
 
   const removeItem = useCallback(

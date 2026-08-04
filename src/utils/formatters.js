@@ -653,6 +653,8 @@ export function normalizeCartItem(item = {}) {
     name: product.name ?? item.product_name ?? item.productName ?? item.name,
     price: item.price ?? product.price,
     product_variant_id: item.product_variant_id,
+    available_quantity:
+      item.available_quantity ?? item.availableQuantity ?? product.available_quantity,
   });
   const quantity = Number(item.quantity ?? item.qty ?? 1);
   const price = Number(item.price ?? item.unitPrice ?? normalizedProduct.price ?? 0);

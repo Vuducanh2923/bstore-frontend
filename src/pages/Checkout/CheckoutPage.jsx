@@ -16,7 +16,6 @@ import { formatCurrency, getPaymentRedirectUrl } from "../../utils/formatters";
 import { getOrderCode, getOrderId, readOrder } from "../../utils/orders";
 import {
   clearPendingVnpayPayment,
-  readPendingVnpayPayment,
   savePendingVnpayPayment,
 } from "../../utils/paymentSession";
 
@@ -78,20 +77,6 @@ function getInitialPaymentMethod(searchParams) {
     : "COD";
 }
 
-function getInitialPendingVnpayOrder() {
-  const pendingPayment = readPendingVnpayPayment();
-
-  if (!pendingPayment?.orderId || !pendingPayment?.amount) {
-    return null;
-  }
-
-  return {
-    amount: Number(pendingPayment.amount),
-    orderCode: pendingPayment.orderCode || "",
-    orderId: pendingPayment.orderId,
-  };
-}
-
 function buildPendingVnpayOrder(order, fallbackAmount) {
   const createdOrder = readOrder(order);
   const orderId = getOrderId(createdOrder) || getOrderId(order);
@@ -146,25 +131,20 @@ export default function CheckoutPage() {
   const { showToast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const initialPendingVnpayOrder = getInitialPendingVnpayOrder();
   const [form, setForm] = useState({
     fullName: user?.full_name || user?.name || "",
     phone: user?.phone || "",
     address: "",
     note: "",
     discountCode: "",
-    paymentMethod: initialPendingVnpayOrder
-      ? "VNPAY"
-      : getInitialPaymentMethod(searchParams),
+    paymentMethod: getInitialPaymentMethod(searchParams),
   });
   const [loading, setLoading] = useState(false);
   const [discountLoading, setDiscountLoading] = useState(false);
   const [discountError, setDiscountError] = useState("");
   const [appliedDiscount, setAppliedDiscount] = useState(null);
   const [message, setMessage] = useState("");
-  const [pendingVnpayOrder, setPendingVnpayOrder] = useState(
-    initialPendingVnpayOrder,
-  );
+  const [pendingVnpayOrder, setPendingVnpayOrder] = useState(null);
   const checkoutInFlightRef = useRef(false);
   const touchedContactFieldsRef = useRef(new Set());
 
@@ -364,9 +344,15 @@ export default function CheckoutPage() {
 
         try {
           await redirectToVnpay(pendingOrder);
-        } catch {
-          setMessage(VNPAY_PENDING_MESSAGE);
-          showToast(VNPAY_PENDING_MESSAGE, "warning");
+        } catch (paymentError) {
+          const paymentErrorMessage = getApiErrorMessage(
+            paymentError,
+            "Không thể tạo đường dẫn thanh toán VNPAY.",
+          );
+          const pendingMessage = `${VNPAY_PENDING_MESSAGE} ${paymentErrorMessage}`;
+
+          setMessage(pendingMessage);
+          showToast(paymentErrorMessage, "error");
         }
 
         return;

@@ -7,7 +7,9 @@ export default function OrderDetailModal({
   loading,
   onCancelOrder,
   onClose,
+  onRetryPayment,
   order,
+  paymentPending,
 }) {
   const orderCode = getOrderCode(order || {});
 
@@ -29,7 +31,9 @@ export default function OrderDetailModal({
           errorMessage={errorMessage}
           loading={loading}
           onCancelOrder={onCancelOrder}
+          onRetryPayment={onRetryPayment}
           order={order}
+          paymentPending={paymentPending}
         />
       </section>
     </div>

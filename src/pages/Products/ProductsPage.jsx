@@ -21,6 +21,7 @@ import {
 import {
   getProductSaleInfo,
   normalizeProductSummary,
+  optimizeCloudinaryImage,
   resolveMediaUrl,
 } from "../../utils/formatters";
 
@@ -197,8 +198,9 @@ function CategoryTabIcon({ icon }) {
       <img
         alt=""
         className="category-tab-icon category-tab-icon--image"
-        loading="lazy"
-        src={resolveMediaUrl(value)}
+        decoding="async"
+        loading="eager"
+        src={optimizeCloudinaryImage(resolveMediaUrl(value), { width: 64, height: 64 })}
       />
     );
   }

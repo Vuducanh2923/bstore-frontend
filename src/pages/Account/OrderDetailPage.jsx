@@ -1,9 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { useToast } from "../../context/ToastContext";
-import { customerOrderService } from "../../services/bstoreService";
+import {
+  customerOrderService,
+  paymentService,
+} from "../../services/bstoreService";
 import { getStatusErrorMessage } from "../../utils/apiErrors";
+import { getPaymentRedirectUrl } from "../../utils/formatters";
 import { getOrderCode, readOrder } from "../../utils/orders";
+import {
+  canRetryVnpayPayment,
+  savePendingVnpayPayment,
+} from "../../utils/paymentSession";
 import OrderDetailView from "./OrderDetailView";
 
 export default function OrderDetailPage() {
@@ -40,6 +48,40 @@ export default function OrderDetailPage() {
     },
   });
 
+  const retryPaymentMutation = useMutation({
+    mutationFn: async () => {
+      const currentOrder = readOrder(orderQuery.data || {});
+
+      if (!canRetryVnpayPayment(currentOrder)) {
+        throw new Error("Đơn hàng không còn ở trạng thái chờ thanh toán.");
+      }
+
+      const payment = await paymentService.createVnpayPayment({
+        order_id: orderId,
+        order_info: `Thanh toán đơn hàng #${orderId}`,
+      });
+      const paymentUrl = getPaymentRedirectUrl(payment);
+
+      if (!paymentUrl) {
+        throw new Error("Backend chưa trả về đường dẫn thanh toán VNPAY.");
+      }
+
+      savePendingVnpayPayment({
+        amount: Number(payment.amount || currentOrder.final_amount || currentOrder.total_amount || 0),
+        orderCode: getOrderCode(currentOrder),
+        orderId,
+      });
+
+      window.location.assign(paymentUrl);
+    },
+    onError: (error) => {
+      showToast(
+        getStatusErrorMessage(error, error?.message || "Không thể tạo thanh toán VNPAY."),
+        "error",
+      );
+    },
+  });
+
   const order = orderQuery.data || null;
   const orderCode = getOrderCode(order || {});
   const errorMessage = !orderId
@@ -66,7 +108,13 @@ export default function OrderDetailPage() {
           errorMessage={errorMessage}
           loading={orderQuery.isLoading || orderQuery.isFetching}
           onCancelOrder={(reason) => cancelOrderMutation.mutateAsync(reason)}
+          onRetryPayment={
+            canRetryVnpayPayment(order || {})
+              ? () => retryPaymentMutation.mutate()
+              : undefined
+          }
           order={order}
+          paymentPending={retryPaymentMutation.isPending}
         />
       </section>
     </main>

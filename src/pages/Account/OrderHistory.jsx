@@ -6,10 +6,18 @@ import StatusMessage from "../../components/StatusMessage";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { readCollection } from "../../services/api";
-import { customerOrderService } from "../../services/bstoreService";
+import {
+  customerOrderService,
+  paymentService,
+} from "../../services/bstoreService";
 import { getStatusErrorMessage } from "../../utils/apiErrors";
-import { formatCurrency } from "../../utils/formatters";
+import { formatCurrency, getPaymentRedirectUrl } from "../../utils/formatters";
+import { getOrderCode, readOrder } from "../../utils/orders";
 import { displayWorkflowText } from "../../utils/orderWorkflow";
+import {
+  canRetryVnpayPayment,
+  savePendingVnpayPayment,
+} from "../../utils/paymentSession";
 import OrderDetailModal from "./OrderDetailModal";
 
 const EMPTY_ORDERS = [];
@@ -196,6 +204,40 @@ export default function OrderHistory() {
     },
   });
 
+  const retryPaymentMutation = useMutation({
+    mutationFn: async () => {
+      const currentOrder = readOrder(detailQuery.data || detailState.order || {});
+      const orderId = detailState.orderId || currentOrder.id || currentOrder.order_id;
+
+      if (!orderId || !canRetryVnpayPayment(currentOrder)) {
+        throw new Error("Đơn hàng không còn ở trạng thái chờ thanh toán.");
+      }
+
+      const payment = await paymentService.createVnpayPayment({
+        order_id: orderId,
+        order_info: `Thanh toán đơn hàng #${orderId}`,
+      });
+      const paymentUrl = getPaymentRedirectUrl(payment);
+
+      if (!paymentUrl) {
+        throw new Error("Backend chưa trả về đường dẫn thanh toán VNPAY.");
+      }
+
+      savePendingVnpayPayment({
+        amount: Number(payment.amount || currentOrder.final_amount || currentOrder.total_amount || 0),
+        orderCode: getOrderCode(currentOrder),
+        orderId,
+      });
+      window.location.assign(paymentUrl);
+    },
+    onError: (error) => {
+      showToast(
+        getStatusErrorMessage(error, error?.message || "Không thể tạo thanh toán VNPAY."),
+        "error",
+      );
+    },
+  });
+
   const orders = ordersQuery.data ?? EMPTY_ORDERS;
   const errorMessage = ordersQuery.error
     ? getStatusErrorMessage(ordersQuery.error, "Không thể tải lịch sử mua hàng.")
@@ -329,7 +371,13 @@ export default function OrderHistory() {
             })
           }
           onClose={handleCloseDetail}
+          onRetryPayment={
+            canRetryVnpayPayment(detailOrder || {})
+              ? () => retryPaymentMutation.mutate()
+              : undefined
+          }
           order={detailOrder}
+          paymentPending={retryPaymentMutation.isPending}
         />
       ) : null}
     </section>

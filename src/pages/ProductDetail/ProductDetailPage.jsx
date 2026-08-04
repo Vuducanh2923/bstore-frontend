@@ -168,7 +168,7 @@ function getWarrantyRows(policy) {
 export default function ProductDetailPage() {
   const { slug } = useParams();
   const { isAuthenticated } = useAuth();
-  const { addToCart } = useCart();
+  const { addToCart, items: cartItems } = useCart();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -325,6 +325,14 @@ export default function ProductDetailPage() {
     selectedVariant.inventory?.availableQuantity !== undefined ||
     product.availableQuantity !== null;
   const isOutOfStock = hasAvailableQuantity && selectedStock === 0;
+  const quantityInCart = cartItems
+    .filter((item) => String(item.variantId) === String(selectedVariant.id))
+    .reduce((total, item) => total + Number(item.quantity || 0), 0);
+  const remainingQuantity = hasAvailableQuantity
+    ? Math.max(0, selectedStock - quantityInCart)
+    : 100;
+  const maximumQuantity = Math.max(1, remainingQuantity);
+  const hasReachedCartLimit = hasAvailableQuantity && remainingQuantity === 0;
   const descriptionHtml = product.description || product.raw?.description || "";
   const sanitizedDescriptionHtml = sanitizeProductDescription(descriptionHtml);
   const shortDescription =
@@ -464,7 +472,10 @@ export default function ProductDetailPage() {
                         : "detail-variant-tile"
                     }
                     key={variant.id || index}
-                    onClick={() => setSelectedVariantId(String(variant.id))}
+                    onClick={() => {
+                      setSelectedVariantId(String(variant.id));
+                      setQuantity(1);
+                    }}
                     type="button"
                   >
                     <strong>{getVariantName(variant, index)}</strong>
@@ -477,7 +488,7 @@ export default function ProductDetailPage() {
 
           <div className="detail-stock-row">
             <span>{isOutOfStock ? "Hết hàng" : "Còn hàng"}</span>
-            {!isOutOfStock ? <label>
+            {!isOutOfStock && !hasReachedCartLimit ? <label>
               <button
                 onClick={() => setQuantity((current) => Math.max(1, current - 1))}
                 type="button"
@@ -486,15 +497,21 @@ export default function ProductDetailPage() {
               </button>
               <input
                 aria-label="Số lượng"
+                max={maximumQuantity}
                 min="1"
                 onChange={(event) =>
-                  setQuantity(Math.max(1, Number(event.target.value) || 1))
+                  setQuantity(
+                    Math.min(maximumQuantity, Math.max(1, Number(event.target.value) || 1)),
+                  )
                 }
                 type="number"
                 value={quantity}
               />
               <button
-                onClick={() => setQuantity((current) => current + 1)}
+                disabled={hasReachedCartLimit || quantity >= maximumQuantity}
+                onClick={() =>
+                  setQuantity((current) => Math.min(maximumQuantity, current + 1))
+                }
                 type="button"
               >
                 +
@@ -509,11 +526,21 @@ export default function ProductDetailPage() {
               </Link>
             ) : (
               <>
-                <button className="primary-button" onClick={handleBuyNow} type="button">
+                <button
+                  className="primary-button"
+                  disabled={hasReachedCartLimit}
+                  onClick={handleBuyNow}
+                  type="button"
+                >
                   Mua ngay
                   <small>Giao hàng hoặc nhận tại cửa hàng</small>
                 </button>
-                <button className="secondary-button" onClick={handleAddToCart} type="button">
+                <button
+                  className="secondary-button"
+                  disabled={hasReachedCartLimit}
+                  onClick={handleAddToCart}
+                  type="button"
+                >
                   Thêm giỏ hàng
                   <small>Đặt giữ sản phẩm</small>
                 </button>

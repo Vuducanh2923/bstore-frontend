@@ -2,7 +2,8 @@ import { getApiErrorMessage } from "../services/api";
 
 export function getValidationErrors(error) {
   const data = error?.response?.data || {};
-  const errors = data.errors || data.validation_errors || {};
+  const errors = data.errors || data.validation_errors ||
+    (data.data && typeof data.data === "object" ? data.data : {});
 
   return Object.entries(errors).reduce((acc, [field, value]) => {
     if (Array.isArray(value)) {
